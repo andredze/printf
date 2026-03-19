@@ -5,6 +5,26 @@ section .text
 ;==================================================================
 
 ;------------------------------------------------------------------
+; Short:   Writes string to stdout
+; In:      %1 --> string to write
+;          %2 = string length
+; Destroy: RAX, RDX, RSI, RDI
+;------------------------------------------------------------------
+
+%macro PutStr 2
+    ; rax = sys_function_code = 1 = write64()
+    mov rax, SYSCALL_CODE_WRITE
+    ; rdi = file_descriptor = stdout
+    mov rdi, STDOUT_CODE
+    ; rsi --> buffer = curr_char = first macro argument
+    mov rsi, %1
+    ; rdx = string length = second macro argument
+    mov rdx, %2
+
+    syscall
+%endmacro
+
+;------------------------------------------------------------------
 ; Short:   Writes one character to stdout
 ; In:      %1 --> character to write
 ; Destroy: RAX, RDX, RSI, RDI
@@ -29,6 +49,7 @@ _start:
     ; push arguments with cdecl calling convention
     ; first argument pushed last (LIFO)
 
+    push -1
     push '4'
     push Message
 
@@ -91,12 +112,11 @@ Printf:
     inc rbx
 
 ; //TODO what to do if string ends on %
-    ; if (curr_symbol == end_symbol) --> error (?)
-    cmp byte [rbx], END_SYMBOL
-    je .Done
-
     cmp byte [rbx], SPEC_CHAR_SYMBOL
     je .ProcessCharSpecifier
+
+    cmp byte [rbx], SPEC_HEX_SYMBOL
+    je .ProcessHexSpecifier
 
     loop .Next
 ;------------------------------------
@@ -120,6 +140,83 @@ Printf:
 
     loop .Next
 
+;------------------------------------
+
+.ProcessHexSpecifier:
+    ; skip HEX_SPEC_SYMBOL ("x")
+    inc rbx
+    ; write "%x" argument (they are stored in stack)
+
+    ; r10 = argument (integer) to make hex
+    mov r10, [rbp]
+    ; rbp --> expected next argument (may not be any args)
+    add rbp, 8
+
+    ; 2**4 = 16 -- degree of hex num system
+    mov r12, 4
+
+    call PrintConvertedInteger
+
+    loop .Next
+
+;------------------------------------------------------------------
+; Short:   Writes in stdout value converted to desired numerical system
+; In:      R10 = integer value
+;          R12 = log_2(numerical system degree)
+; Destroy: R10, R11
+;------------------------------------------------------------------
+
+PrintConvertedInteger:
+    push rcx
+
+    ; r13 used for indexing buffer
+    mov r13, IntBufferSize - 1
+
+.NextByte:
+    ; copy to r11
+    mov r11, r10
+
+    ; get lowest byte
+    and r11, 0x0F
+
+    cmp r11, 10
+    jge .Letter
+
+    add r11, '0'
+
+    jmp .DoneConvert
+
+.Letter:
+    add r11, 'a' - 10
+
+.DoneConvert:
+    ; store char in IntBuffer in reversed order
+    mov byte [IntBuffer + r13], r11b
+    ; go to storing next char (r13--)
+    dec r13
+
+    ; in r12 is degree of 2 of numerical system degree
+    mov rcx, r12
+    ; move to the next byte
+    shr r10, cl
+
+    cmp r10, 0
+    jne .NextByte
+
+    ; r13 --> start of buffer str
+    add r13, IntBuffer + 1
+
+    ; string length = end buffer ptr - start buffer ptr
+    mov rcx, IntBuffer + IntBufferSize
+    sub rcx, r13
+
+    ; when ended --> print buffer
+    PutStr r13, rcx
+
+    pop rcx
+
+    ret
+
 ;==================================================================
 
 section .data
@@ -132,10 +229,14 @@ STDOUT_CODE         equ 0x01
 END_SYMBOL          equ 0x00
 SPEC_SYMBOL         equ '%'
 SPEC_CHAR_SYMBOL    equ 'c'
+SPEC_HEX_SYMBOL     equ 'x'
 
 LF                  equ 0x0a
-Message             db  "darova zaebal, ya syel %c sobak", LF, 0x00
+Message             db  "darova zaebal, ya syel %c sobak; hex 52 = %x", LF, 0x00
 MessageLen          equ $ - Message
+
+IntBuffer           times 16 db 0x0
+IntBufferSize       equ $ - IntBuffer
 
 ;------------------------------------------------------------------
 ; BUFFER_SIZE         equ 2048
