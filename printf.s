@@ -137,8 +137,6 @@ LF                  equ 0x0a
 Message             db  "darova zaebal, ya syel %c sobak", LF, 0x00
 MessageLen          equ $ - Message
 
-CharBuffer          db 0x00
-
 ;------------------------------------------------------------------
 ; BUFFER_SIZE         equ 2048
 ; Buffer              times BUFFER_SIZE db 0
