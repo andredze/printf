@@ -49,6 +49,8 @@ _start:
     ; push arguments with cdecl calling convention
     ; first argument pushed last (LIFO)
 
+    push 256
+    push 16
     push -1
     push '4'
     push Message
@@ -118,6 +120,12 @@ Printf:
     cmp byte [rbx], SPEC_HEX_SYMBOL
     je .ProcessHexSpecifier
 
+    cmp byte [rbx], SPEC_OCT_SYMBOL
+    je .ProcessOctSpecifier
+
+    cmp byte [rbx], SPEC_BIN_SYMBOL
+    je .ProcessBinSpecifier
+
     loop .Next
 ;------------------------------------
 
@@ -143,21 +151,44 @@ Printf:
 ;------------------------------------
 
 .ProcessHexSpecifier:
-    ; skip HEX_SPEC_SYMBOL ("x")
-    inc rbx
-    ; write "%x" argument (they are stored in stack)
+    ; 2**4 = 16 -- degree of hex num system
+    mov r12, 4
 
-    ; r10 = argument (integer) to make hex
+    jmp .ConvertInteger
+
+;------------------------------------
+
+.ProcessOctSpecifier:
+    ; 2**3 = 8 -- degree of oct num system
+    mov r12, 3
+
+    jmp .ConvertInteger
+
+;------------------------------------
+
+.ProcessBinSpecifier:
+    ; 2**1 = 2 -- degree of bin num system
+    mov r12, 1
+
+    jmp .ConvertInteger
+
+;------------------------------------
+
+.ConvertInteger:
+
+    ; skip BIN_SPEC_SYMBOL ("b")
+    inc rbx
+    ; write "%b" argument (they are stored in stack)
+
+    ; r10 = argument (integer) to make bin
     mov r10, [rbp]
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
 
-    ; 2**4 = 16 -- degree of hex num system
-    mov r12, 4
-
     call PrintConvertedInteger
 
-    loop .Next
+    dec rcx
+    jnz .Next
 
 ;------------------------------------------------------------------
 ; Short:   Writes in stdout value converted to desired numerical system
@@ -169,6 +200,16 @@ Printf:
 PrintConvertedInteger:
     push rcx
 
+    ; get r14 = mask for getting lowest part of number
+    ; (hex:0x0F, oct:0x08, bin:0x01)
+    mov rcx, r12
+    ; r14 = 1
+    mov r14, 1
+    ; r14 = 2 ** cl
+    shl r14, cl
+    ; r14 = 2 ** cl - 1
+    dec r14
+
     ; r13 used for indexing buffer
     mov r13, IntBufferSize - 1
 
@@ -177,7 +218,7 @@ PrintConvertedInteger:
     mov r11, r10
 
     ; get lowest byte
-    and r11, 0x0F
+    and r11, r14
 
     cmp r11, 10
     jge .Letter
@@ -230,12 +271,14 @@ END_SYMBOL          equ 0x00
 SPEC_SYMBOL         equ '%'
 SPEC_CHAR_SYMBOL    equ 'c'
 SPEC_HEX_SYMBOL     equ 'x'
+SPEC_OCT_SYMBOL     equ 'o'
+SPEC_BIN_SYMBOL     equ 'b'
 
 LF                  equ 0x0a
-Message             db  "darova zaebal, ya syel %c sobak; hex 52 = %x", LF, 0x00
+Message             db  "darova zaebal, ya syel %c sobak; hex 52 = %x; oct 16 = %o; bin 256 = %b", LF, 0x00
 MessageLen          equ $ - Message
 
-IntBuffer           times 16 db 0x0
+IntBuffer           times 64 db 0x00
 IntBufferSize       equ $ - IntBuffer
 
 ;------------------------------------------------------------------
