@@ -89,14 +89,14 @@ Printf:
     dec rcx
 
 ;------------------------------------
-.Next:
+Next:
     ; if (curr_symbol == end_symbol) --> print
     cmp byte [rbx], END_SYMBOL
-    je .Done
+    je Done
 
     ; if (curr_symbol == specifier_symbol)
     cmp byte [rbx], SPEC_SYMBOL
-    je .Specifier
+    je Specifier
 
     ; write curr_symbol to stdout
     PutChar rbx
@@ -104,32 +104,37 @@ Printf:
     ; rbx++ --> next char
     inc rbx
 
-    loop .Next
-    jmp .Done
+    loop Next
+    jmp Done
 
 ;------------------------------------
 
-.Specifier:
+Specifier:
     ; skip SPEC_SYMBOL ("%")
     inc rbx
 
 ; //TODO what to do if string ends on %
-    cmp byte [rbx], SPEC_CHAR_SYMBOL
-    je .ProcessCharSpecifier
+    movzx r13, byte [rbx]
+    sub r13, SPEC_BIN_SYMBOL
+    mov r15, [SpecifiersJumpTable + r13 * 8]
+    jmp r15
 
-    cmp byte [rbx], SPEC_HEX_SYMBOL
-    je .ProcessHexSpecifier
+;     cmp byte [rbx], SPEC_CHAR_SYMBOL
+;     je .ProcessCharSpecifier
+;
+;     cmp byte [rbx], SPEC_HEX_SYMBOL
+;     je .ProcessHexSpecifier
+;
+;     cmp byte [rbx], SPEC_OCT_SYMBOL
+;     je .ProcessOctSpecifier
+;
+;     cmp byte [rbx], SPEC_BIN_SYMBOL
+;     je .ProcessBinSpecifier
 
-    cmp byte [rbx], SPEC_OCT_SYMBOL
-    je .ProcessOctSpecifier
-
-    cmp byte [rbx], SPEC_BIN_SYMBOL
-    je .ProcessBinSpecifier
-
-    loop .Next
+    loop Next
 ;------------------------------------
 
-.Done:
+Done:
     ; restore rbp value
     pop rbp
 
@@ -137,7 +142,8 @@ Printf:
 
 ;------------------------------------
 
-.ProcessCharSpecifier:
+ProcessWrongSpecifier:
+ProcessCharSpecifier:
     ; skip CHAR_SPEC_SYMBOL ("c")
     inc rbx
     ; write "%c" argument (they are stored in stack)
@@ -146,35 +152,35 @@ Printf:
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
 
-    loop .Next
+    loop Next
 
 ;------------------------------------
 
-.ProcessHexSpecifier:
+ProcessHexSpecifier:
     ; 2**4 = 16 -- degree of hex num system
     mov r12, 4
 
-    jmp .ConvertInteger
+    jmp ConvertInteger
 
 ;------------------------------------
 
-.ProcessOctSpecifier:
+ProcessOctSpecifier:
     ; 2**3 = 8 -- degree of oct num system
     mov r12, 3
 
-    jmp .ConvertInteger
+    jmp ConvertInteger
 
 ;------------------------------------
 
-.ProcessBinSpecifier:
+ProcessBinSpecifier:
     ; 2**1 = 2 -- degree of bin num system
     mov r12, 1
 
-    jmp .ConvertInteger
+    ; fallthrough
 
 ;------------------------------------
 
-.ConvertInteger:
+ConvertInteger:
 
     ; skip BIN_SPEC_SYMBOL ("b")
     inc rbx
@@ -188,7 +194,7 @@ Printf:
     call PrintConvertedInteger
 
     dec rcx
-    jnz .Next
+    jnz Next
 
 ;------------------------------------------------------------------
 ; Short:   Writes in stdout value converted to desired numerical system
@@ -273,6 +279,33 @@ SPEC_CHAR_SYMBOL    equ 'c'
 SPEC_HEX_SYMBOL     equ 'x'
 SPEC_OCT_SYMBOL     equ 'o'
 SPEC_BIN_SYMBOL     equ 'b'
+SPEC_DEC_SYMBOL     equ 'd'
+SPEC_STR_SYMBOL     equ 's'
+
+SpecifiersJumpTable dq ProcessBinSpecifier      ; 'b'
+                    dq ProcessCharSpecifier     ; 'c'
+                    ; db ProcessDecSpecifier      ; 'd'
+                    dq ProcessWrongSpecifier      ; 'd'
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessOctSpecifier      ; 'o'
+                    dq ProcessHexSpecifier      ; 'p'
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier    ; 's'
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessWrongSpecifier
+                    dq ProcessHexSpecifier      ; 'x'
 
 LF                  equ 0x0a
 Message             db  "darova zaebal, ya syel %c sobak; hex 52 = %x; oct 16 = %o; bin 256 = %b", LF, 0x00
