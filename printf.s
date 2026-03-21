@@ -5,6 +5,115 @@ section .text
 extern printf
 
 ;==================================================================
+;------------------------------------------------------------------
+; Short:   Safely puts char in buffer
+; Exp:     PrintfBuffer --> buffer
+;          r8 = PrintBuffer current length
+; In:      %1 = ascii code of a symbol to put
+;          (BYTE REGISTER | IMM)
+; Out:     r8++ (for putting new char) | r8 = 0 if buffer flushed
+; Destroy: RAX, RCX, RDX, RDI, RSI, R11
+;------------------------------------------------------------------
+
+%macro PutCharInBuffer 1
+    ; put char at PrintfBuffer + current buffer length (r8)
+    mov byte [PrintfBuffer + r8], %1
+    ; buffer length++
+    inc r8
+    ; check for buffer length
+    cmp r8, PRINTF_BUFFER_SIZE
+    ; if there is space left in buffer --> Done
+    jl .PutCharInBufferDone
+    ; else --> Flush the Buffer
+    call FlushBuffer
+.PutCharInBufferDone:
+
+%endmacro
+
+;------------------------------------------------------------------
+; Short:   Safely puts string in buffer
+; Exp:     PrintfBuffer --> buffer
+;          r8 = PrintBuffer current length
+; In:      r13 --> string
+;          r12 = string length
+; Out:     r8 += string length (for putting the string) | r8 = 0 if buffer flushed
+; Destroy: RAX, RCX, RDX, RDI, RSI, R11, R12, R13
+;------------------------------------------------------------------
+
+PutStrInBuffer:
+    ; if length == 0 --> done
+    cmp r12, 0
+    je .Done
+
+.Next:
+    mov r11, [r13]
+    ; print current char in buffer
+    PutCharInBuffer r11b
+    ; go to next char (string_ptr++)
+    inc r13
+    ; string_length--
+    dec r12
+    ; if (string_length == 0) --> quit
+    jnz .Next
+
+.Done:
+    ret
+
+;------------------------------------------------------------------
+; Short:   Writes the current state of the printf buffer in stdout
+; In:      r8 = number of characters in buffer that were filled
+;          (it exists to not write all buffer in stdout if we don't need to)
+; Destroy: RAX, RCX, RDX, RDI, RSI, R11
+;------------------------------------------------------------------
+
+FlushBuffer:
+    ; rax = sys_function_code = 1 = write64()
+    mov rax, SYSCALL_CODE_WRITE
+    ; rdi = file_descriptor = stdout
+    mov rdi, STDOUT_CODE
+    ; rsi --> printf buffer
+    mov rsi, PrintfBuffer
+    ; r11 = current buffer length
+    mov rdx, r8
+
+    syscall
+
+    ; set current buffer length = 0
+    xor r8, r8
+
+    ret
+
+;------------------------------------------------------------------
+; Short:   Count string length (till the '\0' terminator)
+; In:      r13 --> string
+; Out:     r12 = string length
+; Destroy: r13
+;------------------------------------------------------------------
+
+StrLen:
+    ; r12 = iterator
+    mov r12, MAX_ITERS_COUNT
+
+.Next:
+    ; if NULL terminator --> end
+    cmp byte [r13], 0
+    je .Done
+
+    ; go to next symbol
+    inc r13
+    ; decrease counter
+    dec r12
+
+    cmp r12, 0
+    jne .Next
+
+.Done:
+    ; r12 = MAX_ITERS_COUNT - length
+    ; string length = -r12 + MAX_ITERS_COUNT
+    neg r12
+    add r12, MAX_ITERS_COUNT
+
+    ret
 
 ;------------------------------------------------------------------
 ; Short:   Writes string to stdout
@@ -26,65 +135,16 @@ extern printf
     syscall
 %endmacro
 
-;------------------------------------------------------------------
-; Short:   Writes one character to stdout
-; In:      %1 --> character to write
-; Destroy: RAX, RDX, RSI, RDI
-;------------------------------------------------------------------
-
-%macro PutChar 1
-    ; first arg --> string = curr_char = first macro argument
-    ; second arg = string length = 1 char
-    PutStr %1, 1
-%endmacro
-
-;------------------------------------------------------------------
-;
-; _start:
-;     ; push arguments with cdecl calling convention
-;     ; first argument pushed last (LIFO)
-;
-;     push 256
-;     push 16
-;     push 256
-;     push '4'
-;     push Message
-;
-;     call my_printf
-;
-; ;------------------------------------
-;
-;     mov rdi, Message
-;     mov rsi, '4'
-;     mov rdx, 256
-;     mov rcx, 16
-;     mov r8, 256
-;
-;     xor rax, rax
-;
-;     call printf
-;
-; ;------------------------------------
-;
-; ; exit(0)
-;     ; rax = 60 = exit()
-;     mov rax, SYSCALL_CODE_EXIT
-;     ; rdi = return code = 00 = success
-;     xor rdi, rdi
-;
-;     syscall
-
 ;------------------<Calling Convention: stdcall>-------------------
-; Note:    System V ABI for x86-64
 ; Short:   -
 ; Exp:     -
 ; In:      -
 ; Out:     -
 ; Destroy: -
+; Note:    calling convention: System V ABI for x86-64
 ;------------------------------------------------------------------
 
 my_printf:
-
     ; save call address in r15
     pop r15
 
@@ -105,8 +165,8 @@ my_printf:
     pop r8
     pop r9
 
-    xor rax, rax
-    call printf
+;     xor rax, rax
+;     call printf
 
     ; restore call address
     jmp r15
@@ -134,18 +194,26 @@ cdecl_printf:
     xor rcx, rcx
     dec rcx
 
+    ; r8 = current print buffer length = 0
+    xor r8, r8
+
+    ; r9 = 0 will be used for storing current char
+    xor r9, r9
+
 ;------------------------------------
 Next:
+    ; r9 = current char
+    mov byte r9b, [rbx]
     ; if (curr_symbol == end_symbol) --> print
-    cmp byte [rbx], END_SYMBOL
+    cmp byte r9b, END_SYMBOL
     je Done
 
     ; if (curr_symbol == specifier_symbol)
-    cmp byte [rbx], SPEC_SYMBOL_START
+    cmp byte r9b, SPEC_SYMBOL_START
     je Specifier
 
     ; write curr_symbol to stdout
-    PutChar rbx
+    PutCharInBuffer r9b
 
     ; rbx++ --> next char
     inc rbx
@@ -153,6 +221,9 @@ Next:
     loop Next
 
 Done:
+    ; flush buffer in stdout
+    call FlushBuffer
+
     ; restore rbp value
     pop rbp
 
@@ -164,28 +235,28 @@ Specifier:
     ; skip SPEC_SYMBOL ("%")
     inc rbx
 
-    ; r13 = specifier symbol character
-    movzx r13, byte [rbx]
+    ; r9b = specifier symbol character
+    mov r9b, byte [rbx]
     ; skip specifier symbol character
     inc rbx
 
     ; if char repeats the SPEC_SYMBOL --> it was escaped
-    cmp byte r13b, SPEC_SYMBOL_START
+    cmp byte r9b, SPEC_SYMBOL_START
     je ProcessSpecifierWrong
 
     ; check the jump table bounds
     ; if (char < first specifier) --> wrong
-    cmp byte r13b, SPEC_SYMBOL_BIN
+    cmp byte r9b, SPEC_SYMBOL_BIN
     jl ProcessSpecifierWrong
 
     ; if (char > last specifier) --> wrong
-    cmp byte r13b, SPEC_SYMBOL_HEX
+    cmp byte r9b, SPEC_SYMBOL_HEX
     jg ProcessSpecifierWrong
     ; jump to ProcessSpecifier by the letter
     ; - SPEC_SYMBOL_BIN * 8 to get the distance from
     ; SPEC_SYMBOL_BIN character (first specifier)
     ; * 8 as pointers are stored with 8 bytes (64 bit architecture)
-    jmp [SpecifiersJumpTable - SPEC_SYMBOL_BIN * 8 + r13 * 8]
+    jmp [SpecifiersJumpTable - SPEC_SYMBOL_BIN * 8 + r9 * 8]
 
 ;------------------------------------
 
@@ -193,7 +264,7 @@ ProcessSpecifierWrong:
     ; just print the SPEC_SYMBOL_START
     ; if it was escaped or it was the wrong spec
     ; (as default libc print does that)
-    PutChar SpecSymbolStart
+    PutCharInBuffer SPEC_SYMBOL_START
 
     loop Next
 
@@ -201,8 +272,11 @@ ProcessSpecifierWrong:
 
 ProcessSpecifierChar:
     ; write "%c" argument (they are stored in stack)
+
     ; rbp --> char to write
-    PutChar rbp
+    movzx r11, byte [rbp]
+    PutCharInBuffer r11b
+
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
 
@@ -212,28 +286,30 @@ ProcessSpecifierChar:
 ;------------------------------------
 
 ProcessSpecifierString:
-    ; r12 --> string to print
-    mov r12, [rbp]
+    ; r13 --> string to print
+    mov r13, [rbp]
+    ; r13 --> string
+    ; r12 will be string length
+    call StrLen
+    ; r13 --> string as it was destroyed
+    mov r13, [rbp]
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
+    ; compare string length with buffer size
+    cmp r12, PRINTF_BUFFER_SIZE
+    ; if it is bigger --> print it right to stdout with syscall
+    jge .PutStrToStdout
+    ; else: store string in buffer
+    call PutStrInBuffer
 
-    ; r11 = MAX_LOOP_ITERS
-    mov r11, -1
+    dec rcx
+    jnz Next
 
-NextPutChar:
-    ; if (char == END_SYMBOL) --> done
-    cmp byte [r12], END_SYMBOL
-    je ProcessStringDone
-
-    ; else --> PutChar
-    PutChar r12
-    ; go to the next char
-    inc r12
-
-    dec r11
-    jnz NextPutChar
-
-ProcessStringDone:
+.PutStrToStdout:
+    ; flush buffer before printing string
+    call FlushBuffer
+    ; print string
+    PutStr r13, r12
 
     dec rcx
     jnz Next
@@ -346,11 +422,13 @@ PrintConvertedPowerOfTwoToAscii:
     add r13, IntBuffer + 1
 
     ; string length = end buffer ptr - start buffer ptr
-    mov rcx, IntBuffer + INT_BUFFER_SIZE
-    sub rcx, r13
+    mov r12, IntBuffer + INT_BUFFER_SIZE
+    sub r12, r13
 
     ; when ended --> print buffer
-    PutStr r13, rcx
+    ; r13 --> string
+    ; r12 = string length
+    call PutStrInBuffer
 
     pop rcx
 
@@ -365,30 +443,31 @@ PrintConvertedPowerOfTwoToAscii:
 ;------------------------------------------------------------------
 
 ConvertDecimalToAscii:
+    ; check int for zero
+    ; as we can not divide by zero
+    cmp eax, 0
+    je DecimalIsZero
 
-    ; check int sign
-    cmp rax, 0
+    ; check int sign for negatives
+    cmp eax, 0
     jge .DoneWithSign
 
     ; if negative --> print '-' and convert to positive
     ; print '-'
     push rax
-    PutChar MinusSign
+    PutCharInBuffer '-'
     pop rax
 
     ; convert integer to positive
     neg eax
 
 .DoneWithSign:
-
-    ; r14 will be used for indexing buffer
-    mov r14, IntBuffer
-
-    ; r13 = MAX_LOOP_ITERS
-    mov r13, -1
+    ; r12 will be used for indexing buffer (from the end)
+    mov r12, INT_BUFFER_SIZE - 1
+    ; r14 = MAX_LOOP_ITERS
+    mov r14, -1
 
 .NextDigit:
-
     ; if (number == 0) --> end
     cmp rax, 0
     jle .Done
@@ -409,30 +488,31 @@ ConvertDecimalToAscii:
     ; convert digit to ascii
     add rdx, '0'
 
-    ; store char in IntBuffer in reversed order
-    mov byte [r14], dl
+    ; store char in IntBuffer from the end (it will be in right order)
+    mov byte [IntBuffer + r12], dl
+    ; go to storing next char (r12--)
+    dec r12
 
-    ; go to storing next char (r14++)
-    inc r14
-
-    dec r13
+    dec r14
     jnz .NextDigit
 
 .Done:
+    ; when ended --> print buffer
+    ; r13 --> string = current_char_ptr + 1
+    mov r13, r12
+    add r13, IntBuffer + 1
+    ; string length = int_buffer_end_ptr - current_char_ptr - 1
+    ;               = INT_BUFFER_SIZE - 1 - r12
+    ;               = - r12 - 1 + INT_BUFFER_SIZE
+    neg r12
+    add r12, INT_BUFFER_SIZE - 1
+    ; put string in buffer as it's size is less than PRINT_BUFFER_SIZE
+    call PutStrInBuffer
 
-.PrintNext:
-    ; print int buffer from the end
-    ; go to last digit
-    dec r14
+    ret
 
-    cmp r14, IntBuffer
-    jl .DonePrinting
-
-    PutChar r14
-
-    jmp .PrintNext
-
-.DonePrinting:
+DecimalIsZero:
+    PutCharInBuffer '0'
 
     ret
 
@@ -440,6 +520,8 @@ ConvertDecimalToAscii:
 
 section .data
 ;------------------------------------------------------------------
+
+MAX_ITERS_COUNT     equ 16384
 
 SYSCALL_CODE_WRITE  equ 1
 SYSCALL_CODE_EXIT   equ 60
@@ -453,9 +535,6 @@ SPEC_SYMBOL_OCT     equ 'o'
 SPEC_SYMBOL_BIN     equ 'b'
 SPEC_SYMBOL_DEC     equ 'd'
 SPEC_SYMBOL_STR     equ 's'
-
-MinusSign           db '-'
-SpecSymbolStart     db '%'
 
 SpecifiersJumpTable dq ProcessSpecifierBin      ; 'b'
                     dq ProcessSpecifierChar     ; 'c'
@@ -481,31 +560,8 @@ SpecifiersJumpTable dq ProcessSpecifierBin      ; 'b'
                     dq ProcessSpecifierWrong    ; 'w'
                     dq ProcessSpecifierHex      ; 'x'
 
-DigitBuffer         db '0'
+INT_BUFFER_SIZE     equ 64
+IntBuffer           times INT_BUFFER_SIZE db 0x00
 
-IntBuffer           times 64 db 0x00
-INT_BUFFER_SIZE     equ $ - IntBuffer
-
-;------------------------------------------------------------------
-; LF                  equ 0x0a
-; Message             db  "darova zaebal, ya syel %c sobak; hex 52 = %p; oct 16 = %o; bin 256 = %b", LF, 0x00
-; MessageLen          equ $ - Message
-; BUFFER_SIZE         equ 2048
-; Buffer              times BUFFER_SIZE db 0
-;
-; ; write(Buffer)
-; ;------------------------------------
-;     ; r11 = number of characters in buffer that were filled
-;     ; it exists to not write all buffer in stdout if we don't need to
-;
-;     ; rax = sys_function_code = 1 = write64()
-;     mov rax, SYSCALL_WRITE_CODE
-;     ; rdi = file_descriptor = stdout
-;     mov rdi, STDOUT_CODE
-;     ; rsi --> buffer
-;     mov rsi, Buffer
-;     ; r11 = string length
-;     mov rdx, r11
-;
-;     syscall
-; ;------------------------------------
+PRINTF_BUFFER_SIZE  equ 2048
+PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
