@@ -2,7 +2,30 @@ global my_printf
 
 section .text
 
+; extern printf
+
 ;==================================================================
+;------------------------------------------------------------------
+; Short:   Writes string to stdout
+; In:      %1 --> string to write
+;          %2 = string length
+; Destroy: rax, rdx, rsi, rdi
+;------------------------------------------------------------------
+
+%macro PutStr 2
+    ; rax = sys_function_code = 1 = write64()
+    mov rax, SYSCALL_CODE_WRITE
+    ; rdi = file_descriptor = stdout
+    mov rdi, STDOUT_CODE
+    ; rsi --> buffer = curr_char = first macro argument
+    mov rsi, %1
+    ; rdx = string length = second macro argument
+    mov rdx, %2
+
+    syscall
+
+%endmacro
+
 ;------------------------------------------------------------------
 ; Short:   Safely puts char in buffer
 ; Exp:     PrintfBuffer --> buffer
@@ -10,7 +33,7 @@ section .text
 ; In:      %1 = ascii code of a symbol to put
 ;          (BYTE REGISTER | IMM)
 ; Out:     r8++ (for putting new char) | r8 = 0 if buffer flushed
-; Destroy: RAX, RCX, RDX, RDI, RSI, R11
+; Destroy: rax, rcx, rdx, rdi, rsi, r11
 ;------------------------------------------------------------------
 
 %macro PutCharInBuffer 1
@@ -36,7 +59,7 @@ section .text
 ;          r12 = string length
 ; Out:     r8 += string length (for putting the string)
 ;       || r8 = 0 if buffer flushed
-; Destroy: RAX, RCX, RDX, RDI, RSI, R11, R12, R13
+; Destroy: rax, rcx, rdx, rdi, rsi, r11, r12, r13
 ;------------------------------------------------------------------
 
 PutStrInBuffer:
@@ -62,7 +85,7 @@ PutStrInBuffer:
 ; Short:   Writes the current state of the printf buffer in stdout
 ; In:      r8 = number of characters in buffer that were filled
 ;          (it exists to not write all buffer in stdout if we don't need to)
-; Destroy: RAX, RCX, RDX, RDI, RSI, R11
+; Destroy: rax, rcx, rdx, rdi, rsi, r11
 ;------------------------------------------------------------------
 
 FlushBuffer:
@@ -92,7 +115,6 @@ FlushBuffer:
 StrLen:
     ; r12 = iterator
     mov r12, MAX_ITERS_COUNT
-
 .Next:
     ; if NULL terminator --> end
     cmp byte [r13], 0
@@ -105,7 +127,6 @@ StrLen:
 
     cmp r12, 0
     jne .Next
-
 .Done:
     ; r12 = MAX_ITERS_COUNT - length
     ; string length = -r12 + MAX_ITERS_COUNT
@@ -114,40 +135,31 @@ StrLen:
 
     ret
 
-;------------------------------------------------------------------
-; Short:   Writes string to stdout
-; In:      %1 --> string to write
-;          %2 = string length
-; Destroy: RAX, RDX, RSI, RDI
-;------------------------------------------------------------------
-
-%macro PutStr 2
-    ; rax = sys_function_code = 1 = write64()
-    mov rax, SYSCALL_CODE_WRITE
-    ; rdi = file_descriptor = stdout
-    mov rdi, STDOUT_CODE
-    ; rsi --> buffer = curr_char = first macro argument
-    mov rsi, %1
-    ; rdx = string length = second macro argument
-    mov rdx, %2
-
-    syscall
-%endmacro
-
 ;------------------<Calling Convention: stdcall>-------------------
 ; Short:   My analog to libC printf function.
 ;          This is a trampoline to cdecl_printf,
-;          where the actual function is
-; Out:     -
+;          where the actual function implementation is.
+; In:      rdi --> format string
+;          after that should be the arguments for every specifier
+;          of the format string in such order (each specifier = 1 argument)
+;          1)  rsi
+;          2)  rdi
+;          3)  rdx
+;          4)  rcx
+;          5)  r8
+;          6)  r9
+;          7+) pushed in stack in reversed order
 ; Destroy: -
-; Note:    calling convention: System V ABI for x86-64
+; Note:    used System V ABI for x86-64
 ;------------------------------------------------------------------
 
 my_printf:
     ; save call address in r15
     pop r15
 
-    ; push System V ABI arguments in reversed order
+    ; make a trampoline for my __cdecl printf
+    ; push 6 register arguments in reversed order
+    ; so that the first argument will be pop'ed first
     push r9
     push r8
     push rcx
@@ -167,12 +179,16 @@ my_printf:
     ; xor rax, rax
     ; call printf
 
-    ; restore call address
+    ; we have ruined the stack, so we can not ret
+    ; we saved return address in r15 so we can jump to it
     jmp r15
 
 ;-------------------<Calling Convention: cdecl>--------------------
-; Short:   My "printf" function realisation
-; In:
+; Short:   My "printf" function realisation with cdecl calling convention
+; In:      [last in stack] --> format string
+;          after that in stack should be the arguments for every specifier
+;          of the format string (each specifier = 1 argument)
+;          in reversed order (first argument has to be pushed last and so on)
 ;------------------------------------------------------------------
 
 cdecl_printf:
@@ -186,18 +202,11 @@ cdecl_printf:
     mov rbx, [rbp]
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
-
-    ; r8 = current buffer length
-    ; (it can be > 0 if it is not the first printf call in program)
-    mov r8, [CurrentPrintfBufferLength]
-
     ; rcx = MAXIMUM_ITERATIONS
     xor rcx, rcx
     dec rcx
-
     ; r8 = current print buffer length = 0
     xor r8, r8
-
     ; r9 = 0 will be used for storing current char
     xor r9, r9
 
@@ -208,14 +217,11 @@ Next:
     ; if (curr_symbol == end_symbol) --> print
     cmp byte r9b, END_SYMBOL
     je Done
-
     ; if (curr_symbol == specifier_symbol)
     cmp byte r9b, SPEC_SYMBOL_START
-    je Specifier
-
+    je ParseSpecifier
     ; write curr_symbol to stdout
     PutCharInBuffer r9b
-
     ; rbx++ --> next char
     inc rbx
 
@@ -224,11 +230,6 @@ Next:
 Done:
     ; flush buffer in stdout
     call FlushBuffer
-
-    ; at the end we have to store the buffer length in
-    ; memory for future calls
-    mov r8, [CurrentPrintfBufferLength]
-
     ; restore rbp value
     pop rbp
 
@@ -236,10 +237,9 @@ Done:
 
 ;------------------------------------
 
-Specifier:
+ParseSpecifier:
     ; skip SPEC_SYMBOL ("%")
     inc rbx
-
     ; r9b = specifier symbol character
     mov r9b, byte [rbx]
     ; skip specifier symbol character
@@ -248,15 +248,14 @@ Specifier:
     ; if char repeats the SPEC_SYMBOL --> it was escaped
     cmp byte r9b, SPEC_SYMBOL_START
     je ProcessSpecifierWrong
-
     ; check the jump table bounds
     ; if (char < first specifier) --> wrong
     cmp byte r9b, SPEC_SYMBOL_BIN
     jl ProcessSpecifierWrong
-
     ; if (char > last specifier) --> wrong
     cmp byte r9b, SPEC_SYMBOL_HEX
     jg ProcessSpecifierWrong
+
     ; jump to ProcessSpecifier by the letter
     ; - SPEC_SYMBOL_BIN * 8 to get the distance from
     ; SPEC_SYMBOL_BIN character (first specifier)
@@ -327,14 +326,14 @@ ProcessSpecifierDec:
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
 
-    call ConvertDecimalToAscii
+    call PrintDecimal
 
     dec rcx
     jnz Next
 
 ;------------------------------------
 
-PrintNullptr:
+ProcessNullptr:
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
 
@@ -353,7 +352,7 @@ PrintNullptr:
 ProcessSpecifierPointer:
     ; if (ptr == 0) --> output (nil)
     cmp qword [rbp], 0
-    je PrintNullptr
+    je ProcessNullptr
 
     ; with '%p' specifier,
     ; at the start of a hex value there is "0x"
@@ -390,19 +389,21 @@ ConvertPowerOfTwoToAscii:
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
 
-    call PrintConvertedPowerOfTwoToAscii
+    call PrintNumberInPowerOfTwoSystem
 
     dec rcx
     jnz Next
 
 ;------------------------------------------------------------------
-; Short:   Writes in stdout value converted to desired numerical system
-; In:      R10 = integer value
-;          R12 = log_2(numerical system degree)
-; Destroy: R10, R11
+; Short:   Writes in printf buffer value converted to desired numerical system
+;          DEGREE OF NUMERICAL SYSTEM SHOULD BE A POWER OF 2
+; In:      r10 = integer value
+;          r12 = log_2(numerical system degree)
+; Example: if hex numerical system ==> degree = 16 = 2**4 ==> r12 = 4
+; Destroy: r10, r11
 ;------------------------------------------------------------------
 
-PrintConvertedPowerOfTwoToAscii:
+PrintNumberInPowerOfTwoSystem:
     push rcx
 
     ; get r14 = mask for getting lowest part of number
@@ -466,33 +467,29 @@ PrintConvertedPowerOfTwoToAscii:
     ret
 
 ;------------------------------------------------------------------
-; Short:   -
-; Exp:     -
-; In:      -
-; Out:     -
-; Destroy: -
+; Short:   Writes in printf buffer value in decimal numerical system
+; In:      rax = integer value
+; Destroy: rax, rcx, rdx, rdi, rsi, r11, r12, r13, r14
 ;------------------------------------------------------------------
 
-ConvertDecimalToAscii:
+PrintDecimal:
     ; check int for zero
     ; as we can not divide by zero
     cmp eax, 0
     je DecimalIsZero
-
     ; check int sign for negatives
     cmp eax, 0
     jge .DoneWithSign
-
     ; if negative --> print '-' and convert to positive
     ; print '-'
     push rax
     PutCharInBuffer '-'
     pop rax
-
     ; convert integer to positive
     neg eax
 
 .DoneWithSign:
+
     ; r12 will be used for indexing buffer (from the end)
     mov r12, INT_BUFFER_SIZE - 1
     ; r14 = MAX_LOOP_ITERS
@@ -550,23 +547,47 @@ DecimalIsZero:
 ;==================================================================
 
 section .data
-;------------------------------------------------------------------
 
+;==================================================================
+
+; That is buffer for storing ASCII symbols of integers
+; in ProcessSpecifier for hex, oct, bin and dec
+INT_BUFFER_SIZE     equ 64
+IntBuffer           times INT_BUFFER_SIZE db 0x00
+
+; That is buffer for my_printf output
+; it is made to do less syscalls
+; Buffer allows to make syscall only when it filled
+; it is done with the FlushBuffer function
+PRINTF_BUFFER_SIZE  equ 2048
+PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
+
+;==================================================================
+
+section .rodata
+
+;==================================================================
+
+; constant for maximum iterations in loops
 MAX_ITERS_COUNT     equ 16384
 
 SYSCALL_CODE_WRITE  equ 1
 SYSCALL_CODE_EXIT   equ 60
+
 STDOUT_CODE         equ 0x01
 
+; strings are NULL terminated
 END_SYMBOL          equ 0x00
-SPEC_SYMBOL_START   equ '%'
-SPEC_SYMBOL_CHAR    equ 'c'
-SPEC_SYMBOL_HEX     equ 'x'
-SPEC_SYMBOL_OCT     equ 'o'
-SPEC_SYMBOL_BIN     equ 'b'
-SPEC_SYMBOL_DEC     equ 'd'
-SPEC_SYMBOL_STR     equ 's'
 
+; start of any specifier
+SPEC_SYMBOL_START   equ '%'
+; first possible specifier
+SPEC_SYMBOL_BIN     equ 'b'
+; last possible specifier
+SPEC_SYMBOL_HEX     equ 'x'
+
+; It is a jump table for handling different specifiers in my_printf function
+; It uses ASCII code of a specifier for indexing
 SpecifiersJumpTable dq ProcessSpecifierBin      ; 'b'
                     dq ProcessSpecifierChar     ; 'c'
                     dq ProcessSpecifierDec      ; 'd'
@@ -591,14 +612,4 @@ SpecifiersJumpTable dq ProcessSpecifierBin      ; 'b'
                     dq ProcessSpecifierWrong    ; 'w'
                     dq ProcessSpecifierHex      ; 'x'
 
-INT_BUFFER_SIZE     equ 64
-IntBuffer           times INT_BUFFER_SIZE db 0x00
-
-PRINTF_BUFFER_SIZE  equ 2048
-PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
-
-; This variable will be used only on entrance to my_printf
-; and on exit. During the printf call printf buffer length
-; is stored in r8 register for speed. By default it initializes with 0,
-; but it will change with my_printf calls.
-CurrentPrintfBufferLength db 0
+;==================================================================
