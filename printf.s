@@ -1,6 +1,8 @@
-global _start
+global my_printf
 
 section .text
+
+extern printf
 
 ;==================================================================
 
@@ -31,16 +33,9 @@ section .text
 ;------------------------------------------------------------------
 
 %macro PutChar 1
-    ; rax = sys_function_code = 1 = write64()
-    mov rax, SYSCALL_CODE_WRITE
-    ; rdi = file_descriptor = stdout
-    mov rdi, STDOUT_CODE
-    ; rsi --> buffer = curr_char = first macro argument
-    mov rsi, %1
-    ; rdx = string length = 1 char
-    mov rdx, 1
-
-    syscall
+    ; first arg --> string = curr_char = first macro argument
+    ; second arg = string length = 1 char
+    PutStr %1, 1
 %endmacro
 
 ;------------------------------------------------------------------
@@ -51,11 +46,25 @@ _start:
 
     push 256
     push 16
-    push -1
+    push 256
     push '4'
     push Message
 
-    call Printf
+    call my_printf
+
+;------------------------------------
+
+    mov rdi, Message
+    mov rsi, '4'
+    mov rdx, 256
+    mov rcx, 16
+    mov r8, 256
+
+    xor rax, rax
+
+    call printf
+
+;------------------------------------
 
 ; exit(0)
     ; rax = 60 = exit()
@@ -65,19 +74,58 @@ _start:
 
     syscall
 
+;------------------<Calling Convention: stdcall>-------------------
+; Note:    System V ABI for x86-64
+; Short:   -
+; Exp:     -
+; In:      -
+; Out:     -
+; Destroy: -
+;------------------------------------------------------------------
+
+my_printf:
+
+    ; save call address in r15
+    pop r15
+
+    ; push System V ABI arguments in reversed order
+    push r9
+    push r8
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+
+    call cdecl_printf
+
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop r8
+    pop r9
+
+    ; restore call address
+    push r15
+
+    xor rax, rax
+    call printf
+
+    ret
+
 ;-------------------<Calling Convention: cdecl>--------------------
 ; Short:   My "printf" function realisation
 ; In:
 ;------------------------------------------------------------------
 
-Printf:
+cdecl_printf:
     ; restore rbp value in stack
     push rbp
     ; rbp --> stack top
     mov rbp, rsp
 
     ; skip pushed rbp and call address in stack to get arguments
-    add rbp, 16
+    add rbp, 8 * 2
 
     ; rbx --> format string
     mov rbx, [rbp]
@@ -116,8 +164,8 @@ Specifier:
 ; //TODO what to do if string ends on %
     movzx r13, byte [rbx]
     sub r13, SPEC_BIN_SYMBOL
-    mov r15, [SpecifiersJumpTable + r13 * 8]
-    jmp r15
+    mov r14, [SpecifiersJumpTable + r13 * 8]
+    jmp r14
 
 ;     cmp byte [rbx], SPEC_CHAR_SYMBOL
 ;     je .ProcessCharSpecifier
@@ -284,8 +332,8 @@ SPEC_STR_SYMBOL     equ 's'
 
 SpecifiersJumpTable dq ProcessBinSpecifier      ; 'b'
                     dq ProcessCharSpecifier     ; 'c'
-                    ; db ProcessDecSpecifier      ; 'd'
-                    dq ProcessWrongSpecifier      ; 'd'
+                    ; db ProcessDecSpecifier    ; 'd'
+                    dq ProcessWrongSpecifier    ; 'd'
                     dq ProcessWrongSpecifier
                     dq ProcessWrongSpecifier
                     dq ProcessWrongSpecifier
@@ -308,7 +356,7 @@ SpecifiersJumpTable dq ProcessBinSpecifier      ; 'b'
                     dq ProcessHexSpecifier      ; 'x'
 
 LF                  equ 0x0a
-Message             db  "darova zaebal, ya syel %c sobak; hex 52 = %x; oct 16 = %o; bin 256 = %b", LF, 0x00
+Message             db  "darova zaebal, ya syel %c sobak; hex 52 = %p; oct 16 = %o; bin 256 = %b", LF, 0x00
 MessageLen          equ $ - Message
 
 IntBuffer           times 64 db 0x00
