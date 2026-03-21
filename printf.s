@@ -372,10 +372,12 @@ ConvertDecimalToAscii:
 
     ; if negative --> print '-' and convert to positive
     ; print '-'
+    push rax
     PutChar MinusSign
+    pop rax
 
-    ; convert to positive
-    neg rax
+    ; convert integer to positive
+    neg eax
 
 .DoneWithSign:
 
