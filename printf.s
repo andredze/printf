@@ -2,8 +2,6 @@ global my_printf
 
 section .text
 
-extern printf
-
 ;==================================================================
 ;------------------------------------------------------------------
 ; Short:   Safely puts char in buffer
@@ -23,10 +21,10 @@ extern printf
     ; check for buffer length
     cmp r8, PRINTF_BUFFER_SIZE
     ; if there is space left in buffer --> Done
-    jl .PutCharInBufferDone
+    jl %%Done
     ; else --> Flush the Buffer
     call FlushBuffer
-.PutCharInBufferDone:
+%%Done:
 
 %endmacro
 
@@ -36,7 +34,8 @@ extern printf
 ;          r8 = PrintBuffer current length
 ; In:      r13 --> string
 ;          r12 = string length
-; Out:     r8 += string length (for putting the string) | r8 = 0 if buffer flushed
+; Out:     r8 += string length (for putting the string)
+;       || r8 = 0 if buffer flushed
 ; Destroy: RAX, RCX, RDX, RDI, RSI, R11, R12, R13
 ;------------------------------------------------------------------
 
@@ -136,9 +135,9 @@ StrLen:
 %endmacro
 
 ;------------------<Calling Convention: stdcall>-------------------
-; Short:   -
-; Exp:     -
-; In:      -
+; Short:   My analog to libC printf function.
+;          This is a trampoline to cdecl_printf,
+;          where the actual function is
 ; Out:     -
 ; Destroy: -
 ; Note:    calling convention: System V ABI for x86-64
@@ -165,8 +164,8 @@ my_printf:
     pop r8
     pop r9
 
-;     xor rax, rax
-;     call printf
+    ; xor rax, rax
+    ; call printf
 
     ; restore call address
     jmp r15
@@ -181,14 +180,16 @@ cdecl_printf:
     push rbp
     ; rbp --> stack top
     mov rbp, rsp
-
     ; skip pushed rbp and call address in stack to get arguments
     add rbp, 8 * 2
-
     ; rbx --> format string
     mov rbx, [rbp]
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
+
+    ; r8 = current buffer length
+    ; (it can be > 0 if it is not the first printf call in program)
+    mov r8, [CurrentPrintfBufferLength]
 
     ; rcx = MAXIMUM_ITERATIONS
     xor rcx, rcx
@@ -223,6 +224,10 @@ Next:
 Done:
     ; flush buffer in stdout
     call FlushBuffer
+
+    ; at the end we have to store the buffer length in
+    ; memory for future calls
+    mov r8, [CurrentPrintfBufferLength]
 
     ; restore rbp value
     pop rbp
@@ -328,6 +333,32 @@ ProcessSpecifierDec:
     jnz Next
 
 ;------------------------------------
+
+PrintNullptr:
+    ; rbp --> expected next argument (may not be any args)
+    add rbp, 8
+
+    ; if nullptr:
+    PutCharInBuffer '('
+    PutCharInBuffer 'n'
+    PutCharInBuffer 'i'
+    PutCharInBuffer 'l'
+    PutCharInBuffer ')'
+
+    dec rcx
+    jnz Next
+
+;------------------------------------
+
+ProcessSpecifierPointer:
+    ; if (ptr == 0) --> output (nil)
+    cmp qword [rbp], 0
+    je PrintNullptr
+
+    ; with '%p' specifier,
+    ; at the start of a hex value there is "0x"
+    PutCharInBuffer '0'
+    PutCharInBuffer 'x'
 
 ProcessSpecifierHex:
     ; 2**4 = 16 -- degree of hex num system
@@ -550,7 +581,7 @@ SpecifiersJumpTable dq ProcessSpecifierBin      ; 'b'
                     dq ProcessSpecifierWrong    ; 'm'
                     dq ProcessSpecifierWrong    ; 'n'
                     dq ProcessSpecifierOct      ; 'o'
-                    dq ProcessSpecifierHex      ; 'p'
+                    dq ProcessSpecifierPointer  ; 'p'
                     dq ProcessSpecifierWrong    ; 'q'
                     dq ProcessSpecifierWrong    ; 'r'
                     dq ProcessSpecifierString   ; 's'
@@ -565,3 +596,9 @@ IntBuffer           times INT_BUFFER_SIZE db 0x00
 
 PRINTF_BUFFER_SIZE  equ 2048
 PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
+
+; This variable will be used only on entrance to my_printf
+; and on exit. During the printf call printf buffer length
+; is stored in r8 register for speed. By default it initializes with 0,
+; but it will change with my_printf calls.
+CurrentPrintfBufferLength db 0
