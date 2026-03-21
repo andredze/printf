@@ -9,7 +9,7 @@ section .text
 ; Short:   Writes string to stdout
 ; In:      %1 --> string to write
 ;          %2 = string length
-; Destroy: rax, rdx, rsi, rdi
+; Destroy: rax, rcx, rdx, rsi, rdi, r11
 ;------------------------------------------------------------------
 
 %macro PutStr 2
@@ -85,20 +85,15 @@ PutStrInBuffer:
 ; Short:   Writes the current state of the printf buffer in stdout
 ; In:      r8 = number of characters in buffer that were filled
 ;          (it exists to not write all buffer in stdout if we don't need to)
+; Out:     r8 = 0
 ; Destroy: rax, rcx, rdx, rdi, rsi, r11
 ;------------------------------------------------------------------
 
 FlushBuffer:
-    ; rax = sys_function_code = 1 = write64()
-    mov rax, SYSCALL_CODE_WRITE
-    ; rdi = file_descriptor = stdout
-    mov rdi, STDOUT_CODE
-    ; rsi --> printf buffer
-    mov rsi, PrintfBuffer
-    ; r11 = current buffer length
-    mov rdx, r8
-
-    syscall
+    ; write buffer in stdout
+    ; %1 --> printf buffer
+    ; %2 = r8 = current buffer length
+    PutStr PrintfBuffer, r8
 
     ; set current buffer length = 0
     xor r8, r8
@@ -149,7 +144,7 @@ StrLen:
 ;          5)  r8
 ;          6)  r9
 ;          7+) pushed in stack in reversed order
-; Destroy: -
+; Destroy: rax, rbx, r10, r11, r12, r13, r14, r15
 ; Note:    used System V ABI for x86-64
 ;------------------------------------------------------------------
 
@@ -189,6 +184,7 @@ my_printf:
 ;          after that in stack should be the arguments for every specifier
 ;          of the format string (each specifier = 1 argument)
 ;          in reversed order (first argument has to be pushed last and so on)
+; Destroy: rax, rbx, rcx, rdx, rdi, rsi, r8, r9, r10, r11, r12, r13, r14
 ;------------------------------------------------------------------
 
 cdecl_printf:
@@ -203,14 +199,12 @@ cdecl_printf:
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
     ; rcx = MAXIMUM_ITERATIONS
-    xor rcx, rcx
-    dec rcx
+    mov rcx, MAX_ITERS_COUNT
     ; r8 = current print buffer length = 0
     xor r8, r8
     ; r9 = 0 will be used for storing current char
     xor r9, r9
 
-;------------------------------------
 Next:
     ; r9 = current char
     mov byte r9b, [rbx]
@@ -235,7 +229,10 @@ Done:
 
     ret
 
-;------------------------------------
+;------------------------------------------------------------------
+;          NOT A FUNCTION, JUST A LABEL
+; Short:   Parses the specifier in the format string
+;------------------------------------------------------------------
 
 ParseSpecifier:
     ; skip SPEC_SYMBOL ("%")
@@ -262,32 +259,43 @@ ParseSpecifier:
     ; * 8 as pointers are stored with 8 bytes (64 bit architecture)
     jmp [SpecifiersJumpTable - SPEC_SYMBOL_BIN * 8 + r9 * 8]
 
-;------------------------------------
+;------------------------------------------------------------------
+;          NOT A FUNCTION, JUST A LABEL
+; Short:   Processes case when the wrong character after "%" was given
+;------------------------------------------------------------------
 
 ProcessSpecifierWrong:
     ; just print the SPEC_SYMBOL_START
     ; if it was escaped or it was the wrong spec
-    ; (as default libc print does that)
+    ; (as default libc print does that some times)
     PutCharInBuffer SPEC_SYMBOL_START
 
     loop Next
 
-;------------------------------------
+;------------------------------------------------------------------
+;          NOT A FUNCTION, JUST A LABEL
+; Short:   Processes case of a specifier "%c"
+;          that is putting a char from an argument
+;------------------------------------------------------------------
 
 ProcessSpecifierChar:
-    ; write "%c" argument (they are stored in stack)
-
+    ; write "%c" argument (arguments are stored in stack)
     ; rbp --> char to write
     movzx r11, byte [rbp]
     PutCharInBuffer r11b
-
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
 
     dec rcx
     jnz Next
 
-;------------------------------------
+;------------------------------------------------------------------
+;          NOT A FUNCTION, JUST A LABEL
+; Short:   Processes case of a specifier "%s"
+;          that is putting a string from an argument.
+;          If the string is very long, it flushes the buffer and writes the string.
+;          In other cases, it will be stored in buffer as other symbols are
+;------------------------------------------------------------------
 
 ProcessSpecifierString:
     ; r13 --> string to print
@@ -318,7 +326,11 @@ ProcessSpecifierString:
     dec rcx
     jnz Next
 
-;------------------------------------
+;------------------------------------------------------------------
+;          NOT A FUNCTION, JUST A LABEL
+; Short:   Processes case of a specifier "%d"
+;          that is putting a decimal integer from an argument (can be signed).
+;------------------------------------------------------------------
 
 ProcessSpecifierDec:
     ; rax = argument integer
@@ -331,8 +343,21 @@ ProcessSpecifierDec:
     dec rcx
     jnz Next
 
-;------------------------------------
+;------------------------------------------------------------------
+;          NOT A FUNCTION, JUST A LABEL
+; Short:   Series of processing cases of specifiers
+;          "%p", "%x", "%o", "%b".
+;          they are similar as they all print an integer in the
+;          numerical system degree of which is a power of two.
+;          "%p" === specifier for a pointer
+;                   (hexadecimal number with "0x" at the start)
+;                   will write "(nil)" if pointer equals to zero
+;          "%x" === specifier for a hexadecimal number
+;          "%o" === specifier for an octal number
+;          "%b" === specifier for a binary number
+;------------------------------------------------------------------
 
+; process case of a null pointer
 ProcessNullptr:
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
@@ -347,8 +372,9 @@ ProcessNullptr:
     dec rcx
     jnz Next
 
-;------------------------------------
+;------------------------------------------------------------------
 
+; "%p" === specifier for a pointer
 ProcessSpecifierPointer:
     ; if (ptr == 0) --> output (nil)
     cmp qword [rbp], 0
@@ -359,6 +385,11 @@ ProcessSpecifierPointer:
     PutCharInBuffer '0'
     PutCharInBuffer 'x'
 
+    ; fallthrough
+
+;------------------------------------
+
+; "%x" === specifier for a hexadecimal number
 ProcessSpecifierHex:
     ; 2**4 = 16 -- degree of hex num system
     mov r12, 4
@@ -367,6 +398,7 @@ ProcessSpecifierHex:
 
 ;------------------------------------
 
+; "%o" === specifier for an octal number
 ProcessSpecifierOct:
     ; 2**3 = 8 -- degree of oct num system
     mov r12, 3
@@ -375,6 +407,7 @@ ProcessSpecifierOct:
 
 ;------------------------------------
 
+; "%b" === specifier for a binary number
 ProcessSpecifierBin:
     ; 2**1 = 2 -- degree of bin num system
     mov r12, 1
@@ -389,7 +422,10 @@ ConvertPowerOfTwoToAscii:
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
 
+    ; have to save rcx for loop
+    push rcx
     call PrintNumberInPowerOfTwoSystem
+    pop rcx
 
     dec rcx
     jnz Next
@@ -400,12 +436,10 @@ ConvertPowerOfTwoToAscii:
 ; In:      r10 = integer value
 ;          r12 = log_2(numerical system degree)
 ; Example: if hex numerical system ==> degree = 16 = 2**4 ==> r12 = 4
-; Destroy: r10, r11
+; Destroy: rax, rcx, rdx, rdi, rsi, r10, r11, r12, r13, r14
 ;------------------------------------------------------------------
 
 PrintNumberInPowerOfTwoSystem:
-    push rcx
-
     ; get r14 = mask for getting lowest part of number
     ; (hex:0x0F, oct:0x08, bin:0x01)
     mov rcx, r12
@@ -415,54 +449,46 @@ PrintNumberInPowerOfTwoSystem:
     shl r14, cl
     ; r14 = 2 ** cl - 1
     dec r14
-
     ; r13 used for indexing buffer
     mov r13, INT_BUFFER_SIZE - 1
 
 .NextByte:
     ; copy to r11
     mov r11, r10
-
     ; get lowest byte
     and r11, r14
 
-    cmp r11, 10
+    cmp r11, 0x0a
+    ; if (r11 >= 0x0a) --> convert letter
     jge .Letter
-
+    ; convert to ascii if digit --> add '0' to a number
     add r11, '0'
-
+    ; skip converting letter
     jmp .DoneConvert
-
 .Letter:
+    ; convert to ascii if letter --> add 'a' to a number but - 10 as ('a' = 10)
     add r11, 'a' - 10
-
 .DoneConvert:
     ; store char in IntBuffer in reversed order
     mov byte [IntBuffer + r13], r11b
     ; go to storing next char (r13--)
     dec r13
-
     ; in r12 is degree of 2 of numerical system degree
     mov rcx, r12
     ; move to the next byte
     shr r10, cl
-
+    ; if not zero --> continue
     cmp r10, 0
     jne .NextByte
-
     ; r13 --> start of buffer str
     add r13, IntBuffer + 1
-
     ; string length = end buffer ptr - start buffer ptr
     mov r12, IntBuffer + INT_BUFFER_SIZE
     sub r12, r13
-
     ; when ended --> print buffer
     ; r13 --> string
     ; r12 = string length
     call PutStrInBuffer
-
-    pop rcx
 
     ret
 
@@ -489,11 +515,10 @@ PrintDecimal:
     neg eax
 
 .DoneWithSign:
-
     ; r12 will be used for indexing buffer (from the end)
     mov r12, INT_BUFFER_SIZE - 1
-    ; r14 = MAX_LOOP_ITERS
-    mov r14, -1
+    ; r14 = MAX_ITERS_COUNT
+    mov r14, MAX_ITERS_COUNT
 
 .NextDigit:
     ; if (number == 0) --> end
@@ -515,7 +540,6 @@ PrintDecimal:
 
     ; convert digit to ascii
     add rdx, '0'
-
     ; store char in IntBuffer from the end (it will be in right order)
     mov byte [IntBuffer + r12], dl
     ; go to storing next char (r12--)
