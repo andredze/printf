@@ -84,17 +84,17 @@ TEST(MyPrintfTest, test_name)                                               \
 
 #define TEST_DATA_POINTER                   \
     "--------- Testing pointers --------\n" \
-    "\t\tint_ptr       = %p\n"              \
     "\t\t0xdeafbaba    = %p\n"              \
     "\t\t0xbeaf        = %p\n"              \
+    "\t\tprintf_ptr    = %p\n"              \
     "\t\tmy_printf_ptr = %p\n"              \
     "\t\t0x00          = %p\n"              \
     "             "                         \
     "-----------------------------------\n",\
-    &int_a,                                 \
     (void*) 0xdeafbaba,                     \
     (void*) 0xbeaf,                         \
-    my_printf_ptr,                          \
+    printf,                                 \
+    my_printf,                              \
     (void*) 0x00
 
 //------------------------------------------------------------------//
