@@ -344,7 +344,7 @@ ProcessSpecifierDec:
     jnz Next
 
 ;------------------------------------------------------------------
-;          NOT A FUNCTION, JUST A LABEL
+;          NOT A FUNCTIONS, JUST LABELS
 ; Short:   Series of processing cases of specifiers
 ;          "%p", "%x", "%o", "%b".
 ;          they are similar as they all print an integer in the
