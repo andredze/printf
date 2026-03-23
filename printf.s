@@ -1,3 +1,5 @@
+default rel
+
 global my_printf
 
 section .text
@@ -40,7 +42,8 @@ extern printf
 
 %macro PutCharInBuffer 1
     ; put char at PrintfBuffer + current buffer length (r8)
-    mov byte [PrintfBuffer + r8], %1
+    lea rax, [rel PrintfBuffer]
+    mov byte [rax + r8], %1
     ; buffer length++
     inc r8
     ; check for buffer length
@@ -95,7 +98,8 @@ FlushBuffer:
     ; write buffer in stdout
     ; %1 --> printf buffer
     ; %2 = r8 = current buffer length
-    PutStr PrintfBuffer, r8
+    lea r11, [rel PrintfBuffer]
+    PutStr r11, r8
 
     ; set current buffer length = 0
     xor r8, r8
@@ -154,9 +158,6 @@ my_printf:
     ; save call address in r15
     pop r15
 
-    ; save call address in memory
-    mov [MyPrintfCallAddress], r15
-
     ; make a trampoline for my __cdecl printf
     ; push 6 register arguments in reversed order
     ; so that the first argument will be pop'ed first
@@ -166,6 +167,9 @@ my_printf:
     push rdx
     push rsi
     push rdi
+
+    ; save call address in memory
+    mov [rel MyPrintfCallAddress], r15
 
     call cdecl_printf
 
@@ -178,17 +182,17 @@ my_printf:
 
     ; save return value in rax as we have to store rax = 0
     ; for calling libC printf
-    mov rax, [MyPrintfReturnValue]
+    mov rax, [rel MyPrintfCallAddress]
 
     xor rax, rax
-    call printf
+    call printf wrt ..plt
 
     ; get my_printf return value
-    mov [MyPrintfReturnValue], rax
+    mov [rel MyPrintfReturnValue], rax
 
     ; we have ruined the stack, so we can not ret
     ; we saved return address in r15 so we can jump to it
-    jmp [MyPrintfCallAddress]
+    jmp [rel MyPrintfCallAddress]
 
 ;-------------------<Calling Convention: cdecl>--------------------
 ; Short:   My "printf" function realisation with cdecl calling convention
@@ -274,7 +278,8 @@ ParseSpecifier:
     ; - SPEC_SYMBOL_BIN * 8 to get the distance from
     ; SPEC_SYMBOL_BIN character (first specifier)
     ; * 8 as pointers are stored with 8 bytes (64 bit architecture)
-    jmp [SpecifiersJumpTable - SPEC_SYMBOL_BIN * 8 + r9 * 8]
+    lea r11, [rel SpecifiersJumpTable]
+    jmp [r11 - SPEC_SYMBOL_BIN * 8 + r9 * 8]
 
 ;------------------------------------------------------------------
 ;                            LABEL
@@ -287,7 +292,8 @@ ProcessSpecifierWrong:
     ; (as default libc print does that some times)
     PutCharInBuffer SPEC_SYMBOL_START
 
-    loop Next
+    dec cx
+    jnz Next
 
 ;------------------------------------------------------------------
 ;                            LABEL
@@ -487,20 +493,22 @@ PrintNumberInPowerOfTwoSystem:
     add r11, 'a' - 10
 .DoneConvert:
     ; store char in IntBuffer in reversed order
-    mov byte [IntBuffer + r13], r11b
+    lea r12, [rel IntBuffer]
+    mov byte [r12 + r13], r11b
     ; go to storing next char (r13--)
     dec r13
-    ; in r12 is degree of 2 of numerical system degree
-    mov rcx, r12
     ; move to the next byte
     shr r10, cl
     ; if not zero --> continue
     cmp r10, 0
     jne .NextByte
     ; r13 --> start of buffer str
-    add r13, IntBuffer + 1
+    lea r10, [rel IntBuffer]
+    add r13, r10
+    inc r13
     ; string length = end buffer ptr - start buffer ptr
-    mov r12, IntBuffer + INT_BUFFER_SIZE
+    mov r12, r10
+    add r12, INT_BUFFER_SIZE
     sub r12, r13
     ; when ended --> print buffer
     ; r13 --> string
@@ -558,7 +566,8 @@ PrintDecimal:
     ; convert digit to ascii
     add rdx, '0'
     ; store char in IntBuffer from the end (it will be in right order)
-    mov byte [IntBuffer + r12], dl
+    lea r13, [rel IntBuffer]
+    mov byte [r13 + r12], dl
     ; go to storing next char (r12--)
     dec r12
 
@@ -567,9 +576,10 @@ PrintDecimal:
 
 .Done:
     ; when ended --> print buffer
-    ; r13 --> string = current_char_ptr + 1
-    mov r13, r12
-    add r13, IntBuffer + 1
+    ; r13 --> string = current_char_ptr (IntBuffer + r12) + 1
+    lea r13, [rel IntBuffer]
+    add r13, r12
+    inc r13
     ; string length = int_buffer_end_ptr - current_char_ptr - 1
     ;               = INT_BUFFER_SIZE - 1 - r12
     ;               = - r12 - 1 + INT_BUFFER_SIZE
@@ -612,10 +622,10 @@ PRINTF_BUFFER_SIZE  equ 2048
 PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
 
 ;==================================================================
-
-section .rodata
-
-;==================================================================
+;
+; section .rodata
+;
+; ;==================================================================
 
 ; constant for maximum iterations in loops
 MAX_ITERS_COUNT     equ 16384
@@ -634,6 +644,19 @@ SPEC_SYMBOL_START   equ '%'
 SPEC_SYMBOL_BIN     equ 'b'
 ; last possible specifier
 SPEC_SYMBOL_HEX     equ 'x'
+
+; ; It is a jump table for handling different specifiers in my_printf function
+; ; It uses ASCII code of a specifier for indexing
+; SpecifiersJumpTable dq ProcessSpecifierBin      ; 'b'
+;                     dq ProcessSpecifierChar     ; 'c'
+;                     dq ProcessSpecifierDec      ; 'd'
+;                     times 'o'-'e' dq ProcessSpecifierWrong ; from "e" to "n"
+;                     dq ProcessSpecifierOct      ; 'o'
+;                     dq ProcessSpecifierPointer  ; 'p'
+;                     times 's'-'q' dq ProcessSpecifierWrong ; from "q" to "r"
+;                     dq ProcessSpecifierString   ; 's'
+;                     times 'x'-'t' dq ProcessSpecifierWrong ; from "t" to "w"
+;                     dq ProcessSpecifierHex      ; 'x'
 
 ; It is a jump table for handling different specifiers in my_printf function
 ; It uses ASCII code of a specifier for indexing

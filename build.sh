@@ -54,7 +54,7 @@ InFrameSuccess "Compiling test.cpp"
 # ------------------------------------------------------------------ #
 
 InFrameDoing "Linking"
-g++ test.o printf.o -no-pie googletest/build/lib/libgtest.a -o test -z noexecstack
+g++ -fPIE test.o printf.o googletest/build/lib/libgtest.a -o test -z noexecstack
 InFrameSuccess "Linking"
 
 # ------------------------------------------------------------------ #
