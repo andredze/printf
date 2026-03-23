@@ -2,7 +2,7 @@
 #include "test.h"
 #include "googletest/googletest/include/gtest/gtest.h"
 
-extern "C" void my_printf(const char* format, ...);
+extern "C" int my_printf(const char* format, ...);
 
 //------------------------------------------------------------------//
 

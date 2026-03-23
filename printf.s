@@ -2,7 +2,7 @@ global my_printf
 
 section .text
 
-; extern printf
+extern printf
 
 ;==================================================================
 ;------------------------------------------------------------------
@@ -13,6 +13,8 @@ section .text
 ;------------------------------------------------------------------
 
 %macro PutStr 2
+    ; add string length to counter of chars, transmitted to stdout
+    add r15, %2
     ; rax = sys_function_code = 1 = write64()
     mov rax, SYSCALL_CODE_WRITE
     ; rdi = file_descriptor = stdout
@@ -152,6 +154,9 @@ my_printf:
     ; save call address in r15
     pop r15
 
+    ; save call address in memory
+    mov [MyPrintfCallAddress], r15
+
     ; make a trampoline for my __cdecl printf
     ; push 6 register arguments in reversed order
     ; so that the first argument will be pop'ed first
@@ -171,12 +176,19 @@ my_printf:
     pop r8
     pop r9
 
-    ; xor rax, rax
-    ; call printf
+    ; save return value in rax as we have to store rax = 0
+    ; for calling libC printf
+    mov rax, [MyPrintfReturnValue]
+
+    xor rax, rax
+    call printf
+
+    ; get my_printf return value
+    mov [MyPrintfReturnValue], rax
 
     ; we have ruined the stack, so we can not ret
     ; we saved return address in r15 so we can jump to it
-    jmp r15
+    jmp [MyPrintfCallAddress]
 
 ;-------------------<Calling Convention: cdecl>--------------------
 ; Short:   My "printf" function realisation with cdecl calling convention
@@ -204,6 +216,9 @@ cdecl_printf:
     xor r8, r8
     ; r9 = 0 will be used for storing current char
     xor r9, r9
+    ; r15 = 0 (r15 equals to characters transmitted to stdout)
+    ; it will be a return value for my_printf
+    xor r15, r15
 
 Next:
     ; r9 = current char
@@ -226,11 +241,13 @@ Done:
     call FlushBuffer
     ; restore rbp value
     pop rbp
+    ; set return value in rax = r15 (chars transmitted to stdout)
+    mov rax, r15
 
     ret
 
 ;------------------------------------------------------------------
-;          NOT A FUNCTION, JUST A LABEL
+;                            LABEL
 ; Short:   Parses the specifier in the format string
 ;------------------------------------------------------------------
 
@@ -260,7 +277,7 @@ ParseSpecifier:
     jmp [SpecifiersJumpTable - SPEC_SYMBOL_BIN * 8 + r9 * 8]
 
 ;------------------------------------------------------------------
-;          NOT A FUNCTION, JUST A LABEL
+;                            LABEL
 ; Short:   Processes case when the wrong character after "%" was given
 ;------------------------------------------------------------------
 
@@ -273,7 +290,7 @@ ProcessSpecifierWrong:
     loop Next
 
 ;------------------------------------------------------------------
-;          NOT A FUNCTION, JUST A LABEL
+;                            LABEL
 ; Short:   Processes case of a specifier "%c"
 ;          that is putting a char from an argument
 ;------------------------------------------------------------------
@@ -290,7 +307,7 @@ ProcessSpecifierChar:
     jnz Next
 
 ;------------------------------------------------------------------
-;          NOT A FUNCTION, JUST A LABEL
+;                            LABEL
 ; Short:   Processes case of a specifier "%s"
 ;          that is putting a string from an argument.
 ;          If the string is very long, it flushes the buffer and writes the string.
@@ -327,7 +344,7 @@ ProcessSpecifierString:
     jnz Next
 
 ;------------------------------------------------------------------
-;          NOT A FUNCTION, JUST A LABEL
+;                            LABEL
 ; Short:   Processes case of a specifier "%d"
 ;          that is putting a decimal integer from an argument (can be signed).
 ;------------------------------------------------------------------
@@ -344,7 +361,7 @@ ProcessSpecifierDec:
     jnz Next
 
 ;------------------------------------------------------------------
-;          NOT A FUNCTIONS, JUST LABELS
+;                           LABELS
 ; Short:   Series of processing cases of specifiers
 ;          "%p", "%x", "%o", "%b".
 ;          they are similar as they all print an integer in the
@@ -573,6 +590,14 @@ DecimalIsZero:
 section .data
 
 ;==================================================================
+
+; This variable is used to store my_printf return value
+; as it will be replaced by libC printf return value after it's call
+MyPrintfReturnValue   dq 0
+
+; This variable is used to store my_printf call address
+; it is used to return from my_printf after executing cdecl_printf
+MyPrintfCallAddress   dq 0
 
 ; That is buffer for storing ASCII symbols of integers
 ; in ProcessSpecifier for hex, oct, bin and dec
