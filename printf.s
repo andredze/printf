@@ -1,3 +1,9 @@
+; directive "default rel" tells the assembler
+; to use RIP-relative addressing by default
+; for example: instead of absolute address of "MyPrintfCallAddress"
+;              it will put RIP-relative address,
+;              which can be written as "rel MyPrintfCallAddress"
+;              if this directive is not used
 default rel
 
 global my_printf
@@ -42,7 +48,7 @@ extern printf
 
 %macro PutCharInBuffer 1
     ; put char at PrintfBuffer + current buffer length (r8)
-    lea rax, [rel PrintfBuffer]
+    lea rax, [PrintfBuffer]
     mov byte [rax + r8], %1
     ; buffer length++
     inc r8
@@ -98,7 +104,7 @@ FlushBuffer:
     ; write buffer in stdout
     ; %1 --> printf buffer
     ; %2 = r8 = current buffer length
-    lea r11, [rel PrintfBuffer]
+    lea r11, [PrintfBuffer]
     PutStr r11, r8
 
     ; set current buffer length = 0
@@ -169,7 +175,7 @@ my_printf:
     push rdi
 
     ; save call address in memory
-    mov [rel MyPrintfCallAddress], r15
+    mov [MyPrintfCallAddress], r15
 
     call cdecl_printf
 
@@ -182,17 +188,21 @@ my_printf:
 
     ; save return value in rax as we have to store rax = 0
     ; for calling libC printf
-    mov rax, [rel MyPrintfCallAddress]
+    mov rax, [MyPrintfCallAddress]
 
+    ; libC printf expects rax set to 0
     xor rax, rax
+    ; wrt ..plt stands for with reference to procedure linkage table (plt)
+    ; within the plt there is code to jump to offsets contained in the GOT
+    ; GOT = global offset table
     call printf wrt ..plt
 
     ; get my_printf return value
-    mov [rel MyPrintfReturnValue], rax
+    mov [MyPrintfReturnValue], rax
 
     ; we have ruined the stack, so we can not ret
     ; we saved return address in r15 so we can jump to it
-    jmp [rel MyPrintfCallAddress]
+    jmp [MyPrintfCallAddress]
 
 ;-------------------<Calling Convention: cdecl>--------------------
 ; Short:   My "printf" function realisation with cdecl calling convention
@@ -245,6 +255,7 @@ Done:
     call FlushBuffer
     ; restore rbp value
     pop rbp
+    ; if successfully executed
     ; set return value in rax = r15 (chars transmitted to stdout)
     mov rax, r15
 
@@ -278,7 +289,7 @@ ParseSpecifier:
     ; - SPEC_SYMBOL_BIN * 8 to get the distance from
     ; SPEC_SYMBOL_BIN character (first specifier)
     ; * 8 as pointers are stored with 8 bytes (64 bit architecture)
-    lea r11, [rel SpecifiersJumpTable]
+    lea r11, [SpecifiersJumpTable]
     jmp [r11 - SPEC_SYMBOL_BIN * 8 + r9 * 8]
 
 ;------------------------------------------------------------------
@@ -493,7 +504,7 @@ PrintNumberInPowerOfTwoSystem:
     add r11, 'a' - 10
 .DoneConvert:
     ; store char in IntBuffer in reversed order
-    lea r12, [rel IntBuffer]
+    lea r12, [IntBuffer]
     mov byte [r12 + r13], r11b
     ; go to storing next char (r13--)
     dec r13
@@ -503,7 +514,7 @@ PrintNumberInPowerOfTwoSystem:
     cmp r10, 0
     jne .NextByte
     ; r13 --> start of buffer str
-    lea r10, [rel IntBuffer]
+    lea r10, [IntBuffer]
     add r13, r10
     inc r13
     ; string length = end buffer ptr - start buffer ptr
@@ -566,7 +577,7 @@ PrintDecimal:
     ; convert digit to ascii
     add rdx, '0'
     ; store char in IntBuffer from the end (it will be in right order)
-    lea r13, [rel IntBuffer]
+    lea r13, [IntBuffer]
     mov byte [r13 + r12], dl
     ; go to storing next char (r12--)
     dec r12
@@ -577,7 +588,7 @@ PrintDecimal:
 .Done:
     ; when ended --> print buffer
     ; r13 --> string = current_char_ptr (IntBuffer + r12) + 1
-    lea r13, [rel IntBuffer]
+    lea r13, [IntBuffer]
     add r13, r12
     inc r13
     ; string length = int_buffer_end_ptr - current_char_ptr - 1

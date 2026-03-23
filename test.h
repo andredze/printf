@@ -25,7 +25,7 @@ TEST(MyPrintfTest, test_name)                                               \
     std::string my_printf_output = testing::internal::GetCapturedStdout();  \
                                                                             \
     EXPECT_EQ(my_printf_ret_value, printf_ret_value);                       \
-    ASSERT_EQ(my_printf_output, printf_output);                             \
+    ASSERT_EQ(my_printf_output,    printf_output);                          \
     printf("\n" YELLOW_COLOR "[MY_PRINTF + LIBC PRINTF]\n");                \
     my_printf(test_data_name);                                              \
     printf("\n" RESET_COLOR);                                               \
@@ -164,6 +164,13 @@ TEST(MyPrintfTest, test_name)                                               \
     33,                                       \
     126
 
+//------------------------------------------------------------------//
+
+#define TEST_DATA_ERRORS                      \
+    "--------- Test for errors ---------\n"   \
+    "%c\n"                                    \
+    "-----------------------------------\n",  \
+    257
 //——————————————————————————————————————————————————————————————————————————————————————————
 
 #endif /* __TESTS_H__ */
