@@ -545,37 +545,117 @@ ProcessSpecifierFloat:
     inc r14
 
 .GotFloat:
-    ; save xmm8 in xmm9 to later get floating part
-    movsd xmm9, xmm8
+    ; check for NaN and Infinity:
+    ; save float in rax
+    movq rax, xmm8
+    ; save float in rdi
+    mov rdi, rax
+    ; double values are stored like that:
+    ;    63    62             52 51         0
+    ; [ sign ][    exponent     ][   frac   ]
+    ;
+    ; if exponent is all 1s --> it is a special value (nan or inf)
+    ;   if frac is all 0s   --> its +inf or -inf (depends on sign bit)
+    ;   if frac != 0        --> its nan
+    ; compare exponent with special exp
+    ; exponents bits would be all 1s
+    ; so if we take negative they will be all 0s
+    not rdi
+    ; extract only the exponent bits
+    ; (set other bits to zero)
+    and rdi, [SPECIAL_FLOAT_EXPONENT_MASK]
+    ; if the result is zero --> than we have a special value
+    cmp rdi, 0
+    je PrintFloatSpecial
+
+    ; else --> we have a normal float
+    call PrintFloatSign
+
+    push rdx
+    call PrintPositiveFloat
+    pop rdx
+
+    dec rcx
+    jnz Next
+
+PrintFloatSpecial:
+    ; count zeros to the first bit that equals 1
+    ; rdi = amount of zeros in the start of xmm8
+    tzcnt rdi, rax
+    ; if the fractal part is all zeros
+    cmp rdi, 52
+    ; than it is infinity
+    je .PrintInfinity
+
+    ; else it is nan
+    PutCharInBuffer 'n'
+    PutCharInBuffer 'a'
+    PutCharInBuffer 'n'
+
+    dec rcx
+    jnz Next
+
+.PrintInfinity:
+    ; print the sign as inf can be signed
+    call PrintFloatSign
+
+    ; print the "inf" string
+    PutCharInBuffer 'i'
+    PutCharInBuffer 'n'
+    PutCharInBuffer 'f'
+
+    dec rcx
+    jnz Next
+
+;------------------------------------------------------------------
+; Short:   Converts float to abs(float) + prints a sign in PrintfBuffer
+; In:      xmm8 = float value
+; Out:     xmm8 = abs(xmm8)
+; Destroy: rax
+;------------------------------------------------------------------
+
+PrintFloatSign:
     ; get mask for signed bits of packed doubles of float arg in rax
     movmskpd rax, xmm8
     ; bit for our float value should be in 0 bit, so apply the mask
     and rax, 0x01
     ; if positive or zero
     cmp rax, 0
-    ; than do nothing
-    je .DoneWithSign
-    ; else
+    jne .Negative
+    ; if positive or zero than do nothing
+    ret
+    ; else if negative
+.Negative:
     ; print minus sign
     PutCharInBuffer '-'
     ; convert xmm8 to it's negative
     movq rax, xmm8
     ; set sign bit to 0 --> positive
     btr rax, 63
-    ; save in xmm8 and xmm9
+    ; save in xmm8
     movq xmm8, rax
-    movq xmm9, rax
 
-.DoneWithSign:
+    ret
+
+;------------------------------------------------------------------
+; Short:   Prints a float value in ASCII in PrintfBuffer
+;          with precision = PRECISION
+; Exp:     float value >= 0
+; In:      xmm8 = float value
+; Destroy: rax, rcx, rdx, rdi, rsi, r11, r12, r13, xmm8, xmm9
+;------------------------------------------------------------------
+
+PrintPositiveFloat:
+    ; save xmm8 in xmm9 to later get floating part
+    movsd xmm9, xmm8
+
     ; convert float value to integer with no rounding (get the integer part)
     ; (with double precision)
     cvttsd2si rax, xmm8
     ; print the integer part
     ; save rdx as we need it for indexing float arguments
     push rax
-    push rdx
     call PrintDecimal
-    pop rdx
     ; print point
     PutCharInBuffer '.'
 
@@ -592,19 +672,16 @@ ProcessSpecifierFloat:
     ; we should print every float with precision = 6
     ; so if fractal part is zero --> we have to put .000000
     cmp rax, 0
-    je PrintZeroFractalPart
+    je .PrintZeroFractalPart
     ; print the fractal part
-    push rdx
     call PrintDecimal
-    pop rdx
 
-    dec rcx
-    jnz Next
+    ret
 
 ; zero fractal part is an exception
 ; because when we multiply by zero it remains zero
 ; however we need to put PRECISION amount of characters
-PrintZeroFractalPart:
+.PrintZeroFractalPart:
     ; put zeros exactly PRECISION times
     mov rdi, PRECISION
 
@@ -615,8 +692,7 @@ PrintZeroFractalPart:
     dec rdi
     jnz .Next
 
-    dec rcx
-    jnz Next
+    ret
 
 ;------------------------------------------------------------------
 ; Short:   Writes in printf buffer value converted to desired numerical system
@@ -792,6 +868,11 @@ PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
 ;
 ; ;==================================================================
 
+; constant for comparing float with inf and nan
+; infinity will do the job because it sets all exponent bits to 1,
+; and frac bits to 0. It is positive so sign bit is also 0
+; float infinity has the special token
+SPECIAL_FLOAT_EXPONENT_MASK dq __?Infinity?__
 ; used for converting fractal part of a float to an integer
 FLOAT_TEN_TO_POWER_FIVE dq 10e+5
 ; precision for printing floats
