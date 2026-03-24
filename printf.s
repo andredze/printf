@@ -857,14 +857,6 @@ IntBuffer           times INT_BUFFER_SIZE db 0x00
 PRINTF_BUFFER_SIZE  equ 2048
 PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
 
-;==================================================================
-
-; this sections allows to put absolute addresses in the jump table
-; but becomes read-only when code is executed
-section .data.rel.ro
-
-;==================================================================
-
 ; It is a jump table for handling different specifiers in my_printf function
 ; It uses ASCII code of a specifier for indexing
 SPECIFIERS_JUMP_TABLE dq ProcessSpecifierBin      ; 'b'
