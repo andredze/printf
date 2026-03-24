@@ -338,7 +338,7 @@ ParseSpecifier:
     ; - SPEC_SYMBOL_BIN * 8 to get the distance from
     ; SPEC_SYMBOL_BIN character (first specifier)
     ; * 8 as pointers are stored with 8 bytes (64 bit architecture)
-    lea r11, [SpecifiersJumpTable]
+    lea r11, [SPECIFIERS_JUMP_TABLE]
     jmp [r11 - SPEC_SYMBOL_BIN * 8 + r9 * 8]
 
 ;------------------------------------------------------------------
@@ -859,6 +859,29 @@ PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
 
 ;==================================================================
 
+; this sections allows to put absolute addresses in the jump table
+; but becomes read-only when code is executed
+section .data.rel.ro
+
+;==================================================================
+
+; It is a jump table for handling different specifiers in my_printf function
+; It uses ASCII code of a specifier for indexing
+SPECIFIERS_JUMP_TABLE dq ProcessSpecifierBin      ; 'b'
+                      dq ProcessSpecifierChar     ; 'c'
+                      dq ProcessSpecifierDec      ; 'd'
+                      dq ProcessSpecifierWrong    ; 'e'
+                      dq ProcessSpecifierFloat    ; 'f'
+                      times 'o'-'g' dq ProcessSpecifierWrong ; from 'g' to 'n'
+                      dq ProcessSpecifierOct      ; 'o'
+                      dq ProcessSpecifierPointer  ; 'p'
+                      times 's'-'q' dq ProcessSpecifierWrong ; from 'q' to 'r'
+                      dq ProcessSpecifierString   ; 's'
+                      times 'x'-'t' dq ProcessSpecifierWrong ; from 't' to 'w'
+                      dq ProcessSpecifierHex      ; 'x'
+
+;==================================================================
+
 section .rodata
 
 ;==================================================================
@@ -889,20 +912,5 @@ SPEC_SYMBOL_START   equ '%'
 SPEC_SYMBOL_BIN     equ 'b'
 ; last possible specifier
 SPEC_SYMBOL_HEX     equ 'x'
-
-; It is a jump table for handling different specifiers in my_printf function
-; It uses ASCII code of a specifier for indexing
-SpecifiersJumpTable dq ProcessSpecifierBin      ; 'b'
-                    dq ProcessSpecifierChar     ; 'c'
-                    dq ProcessSpecifierDec      ; 'd'
-                    dq ProcessSpecifierWrong    ; 'e'
-                    dq ProcessSpecifierFloat    ; 'f'
-                    times 'o'-'g' dq ProcessSpecifierWrong ; from 'g' to 'n'
-                    dq ProcessSpecifierOct      ; 'o'
-                    dq ProcessSpecifierPointer  ; 'p'
-                    times 's'-'q' dq ProcessSpecifierWrong ; from 'q' to 'r'
-                    dq ProcessSpecifierString   ; 's'
-                    times 'x'-'t' dq ProcessSpecifierWrong ; from 't' to 'w'
-                    dq ProcessSpecifierHex      ; 'x'
 
 ;==================================================================
