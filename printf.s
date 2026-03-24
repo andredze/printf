@@ -312,8 +312,7 @@ Done:
     ret
 
 ;------------------------------------------------------------------
-;                            LABEL
-; Short:   Parses the specifier in the format string
+; Parses one specifier in the format string
 ;------------------------------------------------------------------
 
 ParseSpecifier:
@@ -343,8 +342,7 @@ ParseSpecifier:
     jmp [r11 - SPEC_SYMBOL_BIN * 8 + r9 * 8]
 
 ;------------------------------------------------------------------
-;                            LABEL
-; Short:   Processes case when the wrong character after "%" was given
+; Processes case when the wrong character after "%" was given
 ;------------------------------------------------------------------
 
 ProcessSpecifierWrong:
@@ -357,9 +355,7 @@ ProcessSpecifierWrong:
     jnz Next
 
 ;------------------------------------------------------------------
-;                            LABEL
-; Short:   Processes case of a specifier "%c"
-;          that is putting a char from an argument
+; Processes case of a specifier "%c" that is putting a char from an argument
 ;------------------------------------------------------------------
 
 ProcessSpecifierChar:
@@ -374,11 +370,9 @@ ProcessSpecifierChar:
     jnz Next
 
 ;------------------------------------------------------------------
-;                            LABEL
-; Short:   Processes case of a specifier "%s"
-;          that is putting a string from an argument.
-;          If the string is very long, it flushes the buffer and writes the string.
-;          In other cases, it will be stored in buffer as other symbols are
+; Processes case of a specifier "%s" that is putting a string from an argument.
+; If the string is very long, it flushes the buffer and writes the string.
+; In other cases, it will be stored in buffer as other symbols are
 ;------------------------------------------------------------------
 
 ProcessSpecifierString:
@@ -411,9 +405,8 @@ ProcessSpecifierString:
     jnz Next
 
 ;------------------------------------------------------------------
-;                            LABEL
-; Short:   Processes case of a specifier "%d"
-;          that is putting a decimal integer from an argument (can be signed).
+; Processes case of a specifier "%d" that prints
+; a decimal integer from an argument (can be signed).
 ;------------------------------------------------------------------
 
 ProcessSpecifierDec:
@@ -431,20 +424,19 @@ ProcessSpecifierDec:
     jnz Next
 
 ;------------------------------------------------------------------
-;                           LABELS
-; Short:   Series of processing cases of specifiers
-;          "%p", "%x", "%o", "%b".
-;          they are similar as they all print an integer in the
-;          numerical system degree of which is a power of two.
-;          "%p" === specifier for a pointer
-;                   (hexadecimal number with "0x" at the start)
-;                   will write "(nil)" if pointer equals to zero
-;          "%x" === specifier for a hexadecimal number
-;          "%o" === specifier for an octal number
-;          "%b" === specifier for a binary number
+; Series of processing cases of specifiers "%p", "%x", "%o", "%b".
+; they are similar as they all print an integer in the
+; numerical system degree of which is a power of two.
+;   "%p" === specifier for a pointer
+;            (hexadecimal number with "0x" at the start)
+;            will write "(nil)" if pointer equals to zero
+;   "%x" === specifier for a hexadecimal number
+;   "%o" === specifier for an octal number
+;   "%b" === specifier for a binary number
 ;------------------------------------------------------------------
-
-; process case of a null pointer
+;------------------------------------------------------------------
+; Processes case of a null pointer
+;------------------------------------------------------------------
 ProcessNullptr:
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
@@ -460,8 +452,9 @@ ProcessNullptr:
     jnz Next
 
 ;------------------------------------------------------------------
+; Processes case of a specifier "%p" that prints a pointer argument
+;------------------------------------------------------------------
 
-; "%p" === specifier for a pointer
 ProcessSpecifierPointer:
     ; if (ptr == 0) --> output (nil)
     cmp qword [rbp], 0
@@ -474,27 +467,30 @@ ProcessSpecifierPointer:
 
     ; fallthrough
 
-;------------------------------------
+;------------------------------------------------------------------
+; Processes case of a specifier "%x" that prints a hexadecimal number argument
+;------------------------------------------------------------------
 
-; "%x" === specifier for a hexadecimal number
 ProcessSpecifierHex:
     ; 2**4 = 16 -- degree of hex num system
     mov r12, 4
 
     jmp ConvertPowerOfTwoToAscii
 
-;------------------------------------
+;------------------------------------------------------------------
+; Processes case of a specifier "%o" that prints an octal number
+;------------------------------------------------------------------
 
-; "%o" === specifier for an octal number
 ProcessSpecifierOct:
     ; 2**3 = 8 -- degree of oct num system
     mov r12, 3
 
     jmp ConvertPowerOfTwoToAscii
 
-;------------------------------------
+;------------------------------------------------------------------
+; Processes case of a specifier "%b" that prints a binary number
+;------------------------------------------------------------------
 
-; "%b" === specifier for a binary number
 ProcessSpecifierBin:
     ; 2**1 = 2 -- degree of bin num system
     mov r12, 1
@@ -521,9 +517,8 @@ ConvertPowerOfTwoToAscii:
     jnz Next
 
 ;------------------------------------------------------------------
-;                            LABEL
-; Short:   Processes case of a specifier "%f"
-;          that is putting a float from an argument (can be signed).
+; Processes case of a specifier "%f"
+; that prints a float from an argument (can be signed).
 ;------------------------------------------------------------------
 
 ProcessSpecifierFloat:
@@ -863,10 +858,10 @@ PRINTF_BUFFER_SIZE  equ 2048
 PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
 
 ;==================================================================
-;
-; section .rodata
-;
-; ;==================================================================
+
+section .rodata
+
+;==================================================================
 
 ; constant for comparing float with inf and nan
 ; infinity will do the job because it sets all exponent bits to 1,
