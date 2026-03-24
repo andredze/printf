@@ -552,9 +552,9 @@ ProcessSpecifierFloat:
     ; if exponent is all 1s --> it is a special value (nan or inf)
     ;   if frac is all 0s   --> its +inf or -inf (depends on sign bit)
     ;   if frac != 0        --> its nan
-    ; compare exponent with special exp
+    ; if number is special than
     ; exponents bits would be all 1s
-    ; so if we take negative they will be all 0s
+    ; so if we take negative (not) they will be all 0s
     not rdi
     ; extract only the exponent bits
     ; (set other bits to zero)
@@ -573,6 +573,10 @@ ProcessSpecifierFloat:
     dec rcx
     jnz Next
 
+;------------------------------------------------------------------
+; Processes case of a float argument being a NAN, INFINITY or -INFINITY
+;------------------------------------------------------------------
+
 PrintFloatSpecial:
     ; count zeros to the first bit that equals 1
     ; rdi = amount of zeros in the start of xmm8
@@ -589,6 +593,10 @@ PrintFloatSpecial:
 
     dec rcx
     jnz Next
+
+;------------------------------------------------------------------
+; Processes case of a float argument being INFINITY or -INFINITY
+;------------------------------------------------------------------
 
 .PrintInfinity:
     ; print the sign as inf can be signed
