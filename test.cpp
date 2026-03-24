@@ -15,7 +15,7 @@ TEST_SPECIFIER(TestingDecimal,    TEST_DATA_DECIMAL)
 TEST_SPECIFIER(TestingPercent,    TEST_DATA_PERCENT)
 TEST_SPECIFIER(TestingPointer,    TEST_DATA_POINTER)
 TEST_SPECIFIER(TestingPrimerDeda, TEST_DATA_DEDA   )
-TEST_SPECIFIER(TestingErrors,     TEST_DATA_ERRORS )
+TEST_SPECIFIER(TestingFloat,      TEST_DATA_FLOAT  )
 
 //------------------------------------------------------------------//
 

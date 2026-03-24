@@ -17,10 +17,16 @@ extern printf
 ; Short:   Writes string to stdout
 ; In:      %1 --> string to write
 ;          %2 = string length
-; Destroy: rax, rcx, rdx, rsi, rdi, r11
+; Destroy: rax, rcx, rsi, r11
 ;------------------------------------------------------------------
 
 %macro PutStr 2
+    ; it's better to save rdx and rdi
+    ; we do it because syscall is a really slow operation
+    ; because of that we will use this macro rarely
+    ; and because of that this push will not change much
+    push rdx
+    push rdi
     ; add string length to counter of chars, transmitted to stdout
     add r15, %2
     ; rax = sys_function_code = 1 = write64()
@@ -34,6 +40,11 @@ extern printf
 
     syscall
 
+    ; get saved rdi
+    pop rdi
+    ; get saved rdx
+    pop rdx
+
 %endmacro
 
 ;------------------------------------------------------------------
@@ -43,7 +54,7 @@ extern printf
 ; In:      %1 = ascii code of a symbol to put
 ;          (BYTE REGISTER | IMM)
 ; Out:     r8++ (for putting new char) | r8 = 0 if buffer flushed
-; Destroy: rax, rcx, rdx, rdi, rsi, r11
+; Destroy: rax, rcx, rsi, r11
 ;------------------------------------------------------------------
 
 %macro PutCharInBuffer 1
@@ -70,7 +81,7 @@ extern printf
 ;          r12 = string length
 ; Out:     r8 += string length (for putting the string)
 ;       || r8 = 0 if buffer flushed
-; Destroy: rax, rcx, rdx, rdi, rsi, r11, r12, r13
+; Destroy: rax, rcx, rsi, r11, r12, r13
 ;------------------------------------------------------------------
 
 PutStrInBuffer:
@@ -97,7 +108,7 @@ PutStrInBuffer:
 ; In:      r8 = number of characters in buffer that were filled
 ;          (it exists to not write all buffer in stdout if we don't need to)
 ; Out:     r8 = 0
-; Destroy: rax, rcx, rdx, rdi, rsi, r11
+; Destroy: rax, rcx, rsi, r11
 ;------------------------------------------------------------------
 
 FlushBuffer:
@@ -146,16 +157,21 @@ StrLen:
 ; Short:   My analog to libC printf function.
 ;          This is a trampoline to cdecl_printf,
 ;          where the actual function implementation is.
-; In:      rdi --> format string
-;          after that should be the arguments for every specifier
-;          of the format string in such order (each specifier = 1 argument)
+; In:      0) rdi --> format string
+;             after that should be the arguments for every specifier
+;             of the format string in such order (each specifier = 1 argument)
 ;          1)  rsi
-;          2)  rdi
-;          3)  rdx
-;          4)  rcx
-;          5)  r8
-;          6)  r9
-;          7+) pushed in stack in reversed order
+;          2)  rdx
+;          3)  rcx
+;          4)  r8
+;          5)  r9
+;          6+) pushed in stack in reversed order
+;
+;          floats are transferred in xmm registers in right order:
+;          0-7) xmm0 - xmm7
+;             if there are more, they are put in stack in reversed order
+;             as any other type of arguments
+;
 ; Destroy: rax, rbx, r10, r11, r12, r13, r14, r15
 ; Note:    used System V ABI for x86-64
 ;------------------------------------------------------------------
@@ -174,10 +190,31 @@ my_printf:
     push rsi
     push rdi
 
+    ; "push" all xmm registers in stack
+    ; allocate 8 bytes for every xmm register (* 8 registers)
+    ; 8 bytes as we only need the lowest 8 bytes of every xmm
+    sub rsp, 8 * 8
+
+    ; there is no command push for xmm registers,
+    ; so we have to move them right to stack
+    ; movsd = move doubleword, which
+    ; allows us to mov xmm register even so it is 16 bytes long
+    movsd [rsp + 8 * 0], xmm0
+    movsd [rsp + 8 * 1], xmm1
+    movsd [rsp + 8 * 2], xmm2
+    movsd [rsp + 8 * 3], xmm3
+    movsd [rsp + 8 * 4], xmm4
+    movsd [rsp + 8 * 5], xmm5
+    movsd [rsp + 8 * 6], xmm6
+    movsd [rsp + 8 * 7], xmm7
+
     ; save call address in memory
     mov [MyPrintfCallAddress], r15
 
     call cdecl_printf
+
+    ; restore the stack after pushing xmm's
+    add rsp, 8 * 8
 
     pop rdi
     pop rsi
@@ -188,17 +225,18 @@ my_printf:
 
     ; save return value in rax as we have to store rax = 0
     ; for calling libC printf
-    mov rax, [MyPrintfCallAddress]
+    mov [MyPrintfReturnValue], rax
 
-    ; libC printf expects rax set to 0
-    xor rax, rax
+    ; libC printf expects rax set to number of floats
+    ; rax = r14 (count of float's parsed from xmm registers)
+    mov rax, r14
     ; wrt ..plt stands for with reference to procedure linkage table (plt)
     ; within the plt there is code to jump to offsets contained in the GOT
     ; GOT = global offset table
     call printf wrt ..plt
 
     ; get my_printf return value
-    mov [MyPrintfReturnValue], rax
+    mov rax, [MyPrintfReturnValue]
 
     ; we have ruined the stack, so we can not ret
     ; we saved return address in r15 so we can jump to it
@@ -206,10 +244,16 @@ my_printf:
 
 ;-------------------<Calling Convention: cdecl>--------------------
 ; Short:   My "printf" function realisation with cdecl calling convention
-; In:      [last in stack] --> format string
+; In:      all arguments should be pushed from stack:
+;          first 8 bytes must be float values (garbage if there is no argument)
+;          after that:
+;          [9 byte] --> format string
 ;          after that in stack should be the arguments for every specifier
 ;          of the format string (each specifier = 1 argument)
 ;          in reversed order (first argument has to be pushed last and so on)
+; Out:     rax = number of characters transmitted to stdout
+;          r14 = number of float arguments transmitted
+;                through xmm registers in my_printf call
 ; Destroy: rax, rbx, rcx, rdx, rdi, rsi, r8, r9, r10, r11, r12, r13, r14
 ;------------------------------------------------------------------
 
@@ -218,8 +262,12 @@ cdecl_printf:
     push rbp
     ; rbp --> stack top
     mov rbp, rsp
-    ; skip pushed rbp and call address in stack to get arguments
+    ; skip pushed rbp and call address in stack to get float arguments (xmm regs)
     add rbp, 8 * 2
+    ; rdx will be used for indexing floats
+    mov rdx, rbp
+    ; skip pushed xmm regs in stack to get normal arguments
+    add rbp, 8 * 8
     ; rbx --> format string
     mov rbx, [rbp]
     ; rbp --> expected next argument (may not be any args)
@@ -230,6 +278,8 @@ cdecl_printf:
     xor r8, r8
     ; r9 = 0 will be used for storing current char
     xor r9, r9
+    ; r14 = 0 will be used for counting floats used
+    xor r14, r14
     ; r15 = 0 (r15 equals to characters transmitted to stdout)
     ; it will be a return value for my_printf
     xor r15, r15
@@ -372,7 +422,10 @@ ProcessSpecifierDec:
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
 
+    ; save rdx as we need it for indexing float arguments
+    push rdx
     call PrintDecimal
+    pop rdx
 
     dec rcx
     jnz Next
@@ -458,8 +511,109 @@ ConvertPowerOfTwoToAscii:
 
     ; have to save rcx for loop
     push rcx
+    ; save rdx as we need it for indexing float arguments
+    push rdx
     call PrintNumberInPowerOfTwoSystem
+    pop rdx
     pop rcx
+
+    dec rcx
+    jnz Next
+
+;------------------------------------------------------------------
+;                            LABEL
+; Short:   Processes case of a specifier "%f"
+;          that is putting a float from an argument (can be signed).
+;------------------------------------------------------------------
+
+ProcessSpecifierFloat:
+    ; get next float argument (r14 = counter of floats)
+    cmp r14, 8
+    jl .LessThan8FloatsWereParsed
+    ; else --> get as a normal argument from rbp
+    movsd xmm8, [rbp]
+    ; set rbp ready for getting next argument
+    add rbp, 8
+    jmp .GotFloat
+
+.LessThan8FloatsWereParsed:
+    ; if less than 8 args were used, they are indexed with rdx
+    movsd xmm8, [rdx]
+    ; set rdx ready for getting next float value
+    add rdx, 8
+    ; count of floats++
+    inc r14
+
+.GotFloat:
+    ; save xmm8 in xmm9 to later get floating part
+    movsd xmm9, xmm8
+    ; get mask for signed bits of packed doubles of float arg in rax
+    movmskpd rax, xmm8
+    ; bit for our float value should be in 0 bit, so apply the mask
+    and rax, 0x01
+    ; if positive or zero
+    cmp rax, 0
+    ; than do nothing
+    je .DoneWithSign
+    ; else
+    ; print minus sign
+    PutCharInBuffer '-'
+    ; convert xmm8 to it's negative
+    movq rax, xmm8
+    ; set sign bit to 0 --> positive
+    btr rax, 63
+    ; save in xmm8 and xmm9
+    movq xmm8, rax
+    movq xmm9, rax
+
+.DoneWithSign:
+    ; convert float value to integer with no rounding (get the integer part)
+    ; (with double precision)
+    cvttsd2si rax, xmm8
+    ; print the integer part
+    ; save rdx as we need it for indexing float arguments
+    push rax
+    push rdx
+    call PrintDecimal
+    pop rdx
+    ; print point
+    PutCharInBuffer '.'
+
+    pop rax
+    ; convert integer part back to xmm
+    cvtsi2sd xmm8, rax
+    ; xmm9 = fractal part
+    ; subtract from number it's integer part to get the fractal part
+    subsd xmm9, xmm8
+    ; get the fractal part to integer part
+    mulsd xmm9, [FLOAT_TEN_TO_POWER_FIVE]
+    ; convert xmm9 fractal part to integer register
+    cvtsd2si rax, xmm9
+    ; we should print every float with precision = 6
+    ; so if fractal part is zero --> we have to put .000000
+    cmp rax, 0
+    je PrintZeroFractalPart
+    ; print the fractal part
+    push rdx
+    call PrintDecimal
+    pop rdx
+
+    dec rcx
+    jnz Next
+
+; zero fractal part is an exception
+; because when we multiply by zero it remains zero
+; however we need to put PRECISION amount of characters
+PrintZeroFractalPart:
+    ; put zeros exactly PRECISION times
+    mov rdi, PRECISION
+
+.Next:
+    ; print ASCII zero
+    PutCharInBuffer '0'
+
+    dec rdi
+    jnz .Next
 
     dec rcx
     jnz Next
@@ -470,19 +624,19 @@ ConvertPowerOfTwoToAscii:
 ; In:      r10 = integer value
 ;          r12 = log_2(numerical system degree)
 ; Example: if hex numerical system ==> degree = 16 = 2**4 ==> r12 = 4
-; Destroy: rax, rcx, rdx, rdi, rsi, r10, r11, r12, r13, r14
+; Destroy: rax, rcx, rdx, rdi, rsi, r10, r11, r12, r13
 ;------------------------------------------------------------------
 
 PrintNumberInPowerOfTwoSystem:
-    ; get r14 = mask for getting lowest part of number
+    ; get rdi = mask for getting lowest part of number
     ; (hex:0x0F, oct:0x08, bin:0x01)
     mov rcx, r12
-    ; r14 = 1
-    mov r14, 1
-    ; r14 = 2 ** cl
-    shl r14, cl
-    ; r14 = 2 ** cl - 1
-    dec r14
+    ; rdi = 1
+    mov rdi, 1
+    ; rdi = 2 ** cl
+    shl rdi, cl
+    ; rdi = 2 ** cl - 1
+    dec rdi
     ; r13 used for indexing buffer
     mov r13, INT_BUFFER_SIZE - 1
 
@@ -490,7 +644,7 @@ PrintNumberInPowerOfTwoSystem:
     ; copy to r11
     mov r11, r10
     ; get lowest byte
-    and r11, r14
+    and r11, rdi
 
     cmp r11, 0x0a
     ; if (r11 >= 0x0a) --> convert letter
@@ -531,7 +685,7 @@ PrintNumberInPowerOfTwoSystem:
 ;------------------------------------------------------------------
 ; Short:   Writes in printf buffer value in decimal numerical system
 ; In:      rax = integer value
-; Destroy: rax, rcx, rdx, rdi, rsi, r11, r12, r13, r14
+; Destroy: rax, rcx, rdx, rdi, rsi, r11, r12, r13
 ;------------------------------------------------------------------
 
 PrintDecimal:
@@ -553,8 +707,8 @@ PrintDecimal:
 .DoneWithSign:
     ; r12 will be used for indexing buffer (from the end)
     mov r12, INT_BUFFER_SIZE - 1
-    ; r14 = MAX_ITERS_COUNT
-    mov r14, MAX_ITERS_COUNT
+    ; rdi = MAX_ITERS_COUNT
+    mov rdi, MAX_ITERS_COUNT
 
 .NextDigit:
     ; if (number == 0) --> end
@@ -582,7 +736,7 @@ PrintDecimal:
     ; go to storing next char (r12--)
     dec r12
 
-    dec r14
+    dec rdi
     jnz .NextDigit
 
 .Done:
@@ -638,6 +792,10 @@ PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
 ;
 ; ;==================================================================
 
+; used for converting fractal part of a float to an integer
+FLOAT_TEN_TO_POWER_FIVE dq 10e+5
+; precision for printing floats
+PRECISION           equ 6
 ; constant for maximum iterations in loops
 MAX_ITERS_COUNT     equ 16384
 
@@ -656,43 +814,19 @@ SPEC_SYMBOL_BIN     equ 'b'
 ; last possible specifier
 SPEC_SYMBOL_HEX     equ 'x'
 
-; ; It is a jump table for handling different specifiers in my_printf function
-; ; It uses ASCII code of a specifier for indexing
-; SpecifiersJumpTable dq ProcessSpecifierBin      ; 'b'
-;                     dq ProcessSpecifierChar     ; 'c'
-;                     dq ProcessSpecifierDec      ; 'd'
-;                     times 'o'-'e' dq ProcessSpecifierWrong ; from "e" to "n"
-;                     dq ProcessSpecifierOct      ; 'o'
-;                     dq ProcessSpecifierPointer  ; 'p'
-;                     times 's'-'q' dq ProcessSpecifierWrong ; from "q" to "r"
-;                     dq ProcessSpecifierString   ; 's'
-;                     times 'x'-'t' dq ProcessSpecifierWrong ; from "t" to "w"
-;                     dq ProcessSpecifierHex      ; 'x'
-
 ; It is a jump table for handling different specifiers in my_printf function
 ; It uses ASCII code of a specifier for indexing
 SpecifiersJumpTable dq ProcessSpecifierBin      ; 'b'
                     dq ProcessSpecifierChar     ; 'c'
                     dq ProcessSpecifierDec      ; 'd'
                     dq ProcessSpecifierWrong    ; 'e'
-                    dq ProcessSpecifierWrong    ; 'f'
-                    dq ProcessSpecifierWrong    ; 'g'
-                    dq ProcessSpecifierWrong    ; 'h'
-                    dq ProcessSpecifierWrong    ; 'j'
-                    dq ProcessSpecifierWrong    ; 'i'
-                    dq ProcessSpecifierWrong    ; 'k'
-                    dq ProcessSpecifierWrong    ; 'l'
-                    dq ProcessSpecifierWrong    ; 'm'
-                    dq ProcessSpecifierWrong    ; 'n'
+                    dq ProcessSpecifierFloat    ; 'f'
+                    times 'o'-'g' dq ProcessSpecifierWrong ; from 'g' to 'n'
                     dq ProcessSpecifierOct      ; 'o'
                     dq ProcessSpecifierPointer  ; 'p'
-                    dq ProcessSpecifierWrong    ; 'q'
-                    dq ProcessSpecifierWrong    ; 'r'
+                    times 's'-'q' dq ProcessSpecifierWrong ; from 'q' to 'r'
                     dq ProcessSpecifierString   ; 's'
-                    dq ProcessSpecifierWrong    ; 't'
-                    dq ProcessSpecifierWrong    ; 'u'
-                    dq ProcessSpecifierWrong    ; 'v'
-                    dq ProcessSpecifierWrong    ; 'w'
+                    times 'x'-'t' dq ProcessSpecifierWrong ; from 't' to 'w'
                     dq ProcessSpecifierHex      ; 'x'
 
 ;==================================================================
