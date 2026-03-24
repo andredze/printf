@@ -169,9 +169,9 @@ StrLen:
 ;
 ;          floats are transferred in xmm registers in right order:
 ;          0-7) xmm0 - xmm7
-;             if there are more, they are put in stack in reversed order
-;             as any other type of arguments
-;
+;             if there are more, they are put in stack
+;             like any other type of arguments
+; Out:     rax = number of characters transmitted to stdout
 ; Destroy: rax, rbx, r10, r11, r12, r13, r14, r15
 ; Note:    used System V ABI for x86-64
 ;------------------------------------------------------------------
@@ -244,17 +244,18 @@ my_printf:
 
 ;-------------------<Calling Convention: cdecl>--------------------
 ; Short:   My "printf" function realisation with cdecl calling convention
-; In:      all arguments should be pushed from stack:
-;          first 8 bytes must be float values (garbage if there is no argument)
-;          after that:
-;          [9 byte] --> format string
-;          after that in stack should be the arguments for every specifier
+; In:      all arguments should be pushed in stack:
+;               If there are float arguments, first 8 of them should be in stack
+;          at the start in reversed order.
+;               Next float arguments should be transmitted as any other argument:
+;          [rsp + 8 * 8] --> format string (9th byte of stack)
+;          higher in the stack should be an argument for every specifier
 ;          of the format string (each specifier = 1 argument)
 ;          in reversed order (first argument has to be pushed last and so on)
 ; Out:     rax = number of characters transmitted to stdout
 ;          r14 = number of float arguments transmitted
 ;                through xmm registers in my_printf call
-; Destroy: rax, rbx, rcx, rdx, rdi, rsi, r8, r9, r10, r11, r12, r13, r14
+; Destroy: rax, rbx, rcx, rdx, rdi, rsi, r8, r9, r10, r11, r12, r13, r14, r15
 ;------------------------------------------------------------------
 
 cdecl_printf:
