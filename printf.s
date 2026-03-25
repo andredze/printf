@@ -175,13 +175,16 @@ StrLen:
 ;             if there are more, they are put in stack
 ;             like any other type of arguments
 ; Out:     rax = number of characters transmitted to stdout
-; Destroy: rax, rbx, r10, r11, r12, r13, r14, r15
+; Destroy: rax, r10, r11
 ; Note:    used System V ABI for x86-64
+;------------------------------------------------------------------
+; Should be saved according to documentation:
+; rbx, rsp, rbp, r12, r13, r14, r15
 ;------------------------------------------------------------------
 
 my_printf:
-    ; save call address in r15
-    pop r15
+    ; save call address in rax
+    pop rax
 
     ; make a trampoline for my __cdecl printf
     ; push 6 register arguments in reversed order
@@ -212,7 +215,7 @@ my_printf:
     movsd [rsp + 8 * 7], xmm7
 
     ; save call address in memory
-    mov [MyPrintfCallAddress], r15
+    mov [MyPrintfCallAddress], rax
 
     call cdecl_printf
 
@@ -231,14 +234,8 @@ my_printf:
     mov [MyPrintfReturnValue], rax
 
     ; libC printf expects rax set to number of floats
-    ; rax = r14 (count of float's parsed from xmm registers)
-    mov rax, r14
-    cmp rax, 8
-    ; if we used more than 8 floats, than it were 8 floats from registers
-    jbe .LessThan8XmmRegsWereUsed
-    ; than store 8 in rax
-    mov rax, 8
-.LessThan8XmmRegsWereUsed:
+    ; rax = r10 (count of float's parsed from xmm registers)
+    mov rax, r10
     ; wrt ..plt stands for with reference to procedure linkage table (plt)
     ; within the plt there is code to jump to offsets contained in the GOT
     ; GOT = global offset table
@@ -264,16 +261,26 @@ my_printf:
 ; Out:     rax = number of characters transmitted to stdout
 ;          r14 = number of float arguments transmitted
 ;                through xmm registers in my_printf call
-; Destroy: rax, rbx, rcx, rdx, rdi, rsi, r8, r9, r10, r11, r12, r13, r14, r15
+; Destroy: rax, rcx, rdx, rdi, rsi, r8, r9, r10, r11
+;------------------------------------------------------------------
+; Should be saved according to documentation:
+; rbx, rsp, rbp, r12, r13, r14, r15
 ;------------------------------------------------------------------
 
 cdecl_printf:
-    ; restore rbp value in stack
+    ; Should be saved according to documentation (callee-saved regs)
+    ; rbx, rsp, rbp, r12, r13, r14, r15
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    ; store rbp value in stack
     push rbp
     ; rbp --> stack top
     mov rbp, rsp
-    ; skip pushed rbp and call address in stack to get float arguments (xmm regs)
-    add rbp, 8 * 2
+    ; skip pushed registers and call address in stack to get float arguments (xmm regs)
+    add rbp, 8 * 7
     ; rdx will be used for indexing floats
     mov rdx, rbp
     ; skip pushed xmm regs in stack to get normal arguments
@@ -322,6 +329,20 @@ Done:
     ; if successfully executed
     ; set return value in rax = r15 (chars transmitted to stdout)
     mov rax, r15
+    ; save amount of float regs used in r10
+    mov r10, r14
+    cmp r10, 8
+    ; if we used more than 8 floats, than it were 8 floats from registers
+    jbe .LessThan8XmmRegsWereUsed
+    ; than store 8 in r10
+    mov r10, 8
+.LessThan8XmmRegsWereUsed:
+    ; restore all the registers
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
 
     ret
 
@@ -382,7 +403,8 @@ ShiftPointerToNextFloatArgument:
     je .Exactly8FloatArgumentsUsed
     ja .MoreThan8FloatArgumentsUsed
     ; if not --> continue using normally
-    loop Next
+    dec rcx
+    jnz Next
 
 .Exactly8FloatArgumentsUsed:
     ; if we have not synced yet
@@ -390,7 +412,8 @@ ShiftPointerToNextFloatArgument:
     cmp rsi, 5
     jge .SyncFloatWithNormalArguments
     ; if have not used, than do nothing
-    loop Next
+    dec rcx
+    jnz Next
 
 .SyncFloatWithNormalArguments:
     ; else: r14 = rsi - 5, so that floats will be
