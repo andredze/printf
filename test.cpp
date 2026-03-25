@@ -15,9 +15,10 @@ TEST_SPECIFIER(TestingBinary    , TEST_DATA_BINARY    )
 TEST_SPECIFIER(TestingDecimal   , TEST_DATA_DECIMAL   )
 TEST_SPECIFIER(TestingPercent   , TEST_DATA_PERCENT   )
 TEST_SPECIFIER(TestingPointer   , TEST_DATA_POINTER   )
-TEST_SPECIFIER(TestingPrimerDeda, TEST_DATA_DEDA      )
 TEST_SPECIFIER(TestingFloat     , TEST_DATA_FLOAT     )
+TEST_SPECIFIER(TestingFloat2    , TEST_DATA_FLOAT2    )
 TEST_SPECIFIER(TestingFloatCases, TEST_DATA_EXCEPTIONS)
+TEST_SPECIFIER(TestingPrimerDeda, TEST_DATA_DEDA      )
 
 //------------------------------------------------------------------//
 

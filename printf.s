@@ -290,8 +290,8 @@ cdecl_printf:
     xor r8, r8
     ; r9 = 0 will be used for storing current char
     xor r9, r9
-    ; r13 = 0 will be used for counting normal arguments from registers used
-    xor r13, r13
+    ; rsi = 0 will be used for counting normal arguments from registers used
+    xor rsi, rsi
     ; r14 = 0 will be used for counting floats used
     xor r14, r14
     ; r15 = 0 (r15 equals to characters transmitted to stdout)
@@ -373,22 +373,44 @@ ShiftPointerToNextFloatArgument:
     inc r14
     ; check if we used all xmm0-xmm7 from stack
     cmp r14, 8
-    jge .Used8OrMoreFloatArguments
+    je .Exactly8FloatArgumentsUsed
+    ja .MoreThan8FloatArgumentsUsed
     ; if not --> continue using normally
+    loop Next
 
-.Used8OrMoreFloatArguments:
+.Exactly8FloatArgumentsUsed:
+    ; if we have not synced yet
+    ; but used 5+ normal args and 8 float args
+    cmp rsi, 5
+    jge .SyncFloatWithNormalArguments
+    ; if have not used, than do nothing
+    loop Next
+
+.SyncFloatWithNormalArguments:
+    ; else: r14 = rsi - 5, so that floats will be
+    ; shifted by the amount of stack normal registers
+    ; that way they will be synced
+    add r14, rsi
+    sub r14, 5
+
+    dec rcx
+    jnz Next
+
+.MoreThan8FloatArgumentsUsed:
     ; if we used all xmm0-xmm7 from stack
     cmp rsi, 5
     jge .Used5OrMoreNormalArguments
     ; else if we had not used 5 normal arguments
     ; than we don't need to sync anything
-    loop Next
+    dec rcx
+    jnz Next
 
 .Used5OrMoreNormalArguments:
     ; than we have to sync with normal arguments pointer (rbp)
     add rbp, 8
 
-    loop Next
+    dec rcx
+    jnz Next
 
 ;------------------------------------------------------------------
 ; Parses one specifier in the format string
