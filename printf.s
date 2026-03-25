@@ -326,6 +326,9 @@ Done:
     ret
 
 ;------------------------------------------------------------------
+; (after use of a normal argument)
+; Increases pointers to float and normal arguments if needed
+; It depends on the amount of arguments because of how they are placed in stack
 ;------------------------------------------------------------------
 
 ShiftPointerToNextNormalArgument:
@@ -367,6 +370,9 @@ ShiftPointerToNextNormalArgument:
     loop Next
 
 ;------------------------------------------------------------------
+; (after use of a float argument)
+; Increases pointers to float and normal arguments if needed.
+; It depends on the amount of arguments because of how they are placed in stack
 ;------------------------------------------------------------------
 
 ShiftPointerToNextFloatArgument:
