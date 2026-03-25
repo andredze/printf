@@ -1,0 +1,5 @@
+int heavy_func () {
+    timer = init
+    heavy)func_orig()
+    timer.stop()
+}

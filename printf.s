@@ -17,16 +17,17 @@ extern printf
 ; Short:   Writes string to stdout
 ; In:      %1 --> string to write
 ;          %2 = string length
-; Destroy: rax, rcx, rsi, r11
+; Destroy: rax, rcx, r11
 ;------------------------------------------------------------------
 
 %macro PutStr 2
-    ; it's better to save rdx and rdi
+    ; it's better to save rdx and rdi, rsi
     ; we do it because syscall is a really slow operation
     ; because of that we will use this macro rarely
     ; and because of that this push will not change much
     push rdx
     push rdi
+    push rsi
     ; add string length to counter of chars, transmitted to stdout
     add r15, %2
     ; rax = sys_function_code = 1 = write64()
@@ -40,6 +41,8 @@ extern printf
 
     syscall
 
+    ; get saved rsi
+    pop rsi
     ; get saved rdi
     pop rdi
     ; get saved rdx
@@ -54,7 +57,7 @@ extern printf
 ; In:      %1 = ascii code of a symbol to put
 ;          (BYTE REGISTER | IMM)
 ; Out:     r8++ (for putting new char) | r8 = 0 if buffer flushed
-; Destroy: rax, rcx, rsi, r11
+; Destroy: rax, rcx, r11
 ;------------------------------------------------------------------
 
 %macro PutCharInBuffer 1
@@ -77,26 +80,26 @@ extern printf
 ; Short:   Safely puts string in buffer
 ; Exp:     PrintfBuffer --> buffer
 ;          r8 = PrintBuffer current length
-; In:      r13 --> string
-;          r12 = string length
+; In:      r11 --> string
+;          r13 = string length
 ; Out:     r8 += string length (for putting the string)
 ;       || r8 = 0 if buffer flushed
-; Destroy: rax, rcx, rsi, r11, r12, r13
+; Destroy: rax, rcx, r11, r13
 ;------------------------------------------------------------------
 
 PutStrInBuffer:
     ; if length == 0 --> done
-    cmp r12, 0
+    cmp r13, 0
     je .Done
 
 .Next:
-    mov r11, [r13]
+    mov rcx, [r11]
     ; print current char in buffer
-    PutCharInBuffer r11b
+    PutCharInBuffer cl
     ; go to next char (string_ptr++)
-    inc r13
+    inc r11
     ; string_length--
-    dec r12
+    dec r13
     ; if (string_length == 0) --> quit
     jnz .Next
 
@@ -108,7 +111,7 @@ PutStrInBuffer:
 ; In:      r8 = number of characters in buffer that were filled
 ;          (it exists to not write all buffer in stdout if we don't need to)
 ; Out:     r8 = 0
-; Destroy: rax, rcx, rsi, r11
+; Destroy: rax, rcx, r11
 ;------------------------------------------------------------------
 
 FlushBuffer:
@@ -125,31 +128,31 @@ FlushBuffer:
 
 ;------------------------------------------------------------------
 ; Short:   Count string length (till the '\0' terminator)
-; In:      r13 --> string
-; Out:     r12 = string length
-; Destroy: r13
+; In:      r11 --> string
+; Out:     r13 = string length
+; Destroy: r11
 ;------------------------------------------------------------------
 
 StrLen:
-    ; r12 = iterator
-    mov r12, MAX_ITERS_COUNT
+    ; r13 = iterator
+    mov r13, MAX_ITERS_COUNT
 .Next:
     ; if NULL terminator --> end
-    cmp byte [r13], 0
+    cmp byte [r11], 0
     je .Done
 
     ; go to next symbol
-    inc r13
+    inc r11
     ; decrease counter
-    dec r12
+    dec r13
 
-    cmp r12, 0
+    cmp r13, 0
     jne .Next
 .Done:
-    ; r12 = MAX_ITERS_COUNT - length
-    ; string length = -r12 + MAX_ITERS_COUNT
-    neg r12
-    add r12, MAX_ITERS_COUNT
+    ; r13 = MAX_ITERS_COUNT - length
+    ; string length = -r13 + MAX_ITERS_COUNT
+    neg r13
+    add r13, MAX_ITERS_COUNT
 
     ret
 
@@ -230,6 +233,12 @@ my_printf:
     ; libC printf expects rax set to number of floats
     ; rax = r14 (count of float's parsed from xmm registers)
     mov rax, r14
+    cmp rax, 8
+    ; if we used more than 8 floats, than it were 8 floats from registers
+    jbe .LessThan8XmmRegsWereUsed
+    ; than store 8 in rax
+    mov rax, 8
+.LessThan8XmmRegsWereUsed:
     ; wrt ..plt stands for with reference to procedure linkage table (plt)
     ; within the plt there is code to jump to offsets contained in the GOT
     ; GOT = global offset table
@@ -271,6 +280,8 @@ cdecl_printf:
     add rbp, 8 * 8
     ; rbx --> format string
     mov rbx, [rbp]
+    ; r12 --> first stack argument (before I pushed registers)
+    lea r12, [rbp + 6 * 8]
     ; rbp --> expected next argument (may not be any args)
     add rbp, 8
     ; rcx = MAXIMUM_ITERATIONS
@@ -279,6 +290,8 @@ cdecl_printf:
     xor r8, r8
     ; r9 = 0 will be used for storing current char
     xor r9, r9
+    ; r13 = 0 will be used for counting normal arguments from registers used
+    xor r13, r13
     ; r14 = 0 will be used for counting floats used
     xor r14, r14
     ; r15 = 0 (r15 equals to characters transmitted to stdout)
@@ -311,6 +324,71 @@ Done:
     mov rax, r15
 
     ret
+
+;------------------------------------------------------------------
+;------------------------------------------------------------------
+
+ShiftPointerToNextNormalArgument:
+    ; rsi = counter of normal arguments used from registers (rsi-r9)
+    inc rsi
+    ; rbp --> expected next argument (may not be any args)
+    add rbp, 8
+    ; if parsed more than 8 float arguments
+    ; --> we have to sync with floats
+    cmp r14, 8
+    jae .Parsed8OrMoreFloatArguments
+    ; if we have not used 8 floats yet --> don't sync anything
+    loop Next
+
+.Parsed8OrMoreFloatArguments:
+    ; if we are taking floats from stack:
+    ; check if we used all normal arguments from registers
+    cmp rsi, 5
+    ; if bigger, than we have synced them already
+    ja .AlreadySyncedWithFloats
+    ; if equal, than we have to place rbp to a current float pointer
+    je .SyncNormalArgumentsWithFloatArguments
+    ; if no, than don't sync anything
+    loop Next
+
+.SyncNormalArgumentsWithFloatArguments:
+    lea rbp, [r12 - 8 * 8 + r14 * 8]
+
+    loop Next
+
+.AlreadySyncedWithFloats:
+    ; if we already used more than 5 normal args,
+    ; and more than 8 float args,
+    ; then pointers should be synced already
+    ; so we have to just increase pointer for floats
+    ; as we have already increased normal args ptr (rbp += 8)
+    inc r14
+
+    loop Next
+
+;------------------------------------------------------------------
+;------------------------------------------------------------------
+
+ShiftPointerToNextFloatArgument:
+    inc r14
+    ; check if we used all xmm0-xmm7 from stack
+    cmp r14, 8
+    jge .Used8OrMoreFloatArguments
+    ; if not --> continue using normally
+
+.Used8OrMoreFloatArguments:
+    ; if we used all xmm0-xmm7 from stack
+    cmp rsi, 5
+    jge .Used5OrMoreNormalArguments
+    ; else if we had not used 5 normal arguments
+    ; than we don't need to sync anything
+    loop Next
+
+.Used5OrMoreNormalArguments:
+    ; than we have to sync with normal arguments pointer (rbp)
+    add rbp, 8
+
+    loop Next
 
 ;------------------------------------------------------------------
 ; Parses one specifier in the format string
@@ -352,7 +430,7 @@ ProcessSpecifierWrong:
     ; (as default libc print does that some times)
     PutCharInBuffer SPEC_SYMBOL_START
 
-    dec cx
+    dec rcx
     jnz Next
 
 ;------------------------------------------------------------------
@@ -364,11 +442,8 @@ ProcessSpecifierChar:
     ; rbp --> char to write
     movzx r11, byte [rbp]
     PutCharInBuffer r11b
-    ; rbp --> expected next argument (may not be any args)
-    add rbp, 8
 
-    dec rcx
-    jnz Next
+    jmp ShiftPointerToNextNormalArgument
 
 ;------------------------------------------------------------------
 ; Processes case of a specifier "%s" that is putting a string from an argument.
@@ -377,33 +452,29 @@ ProcessSpecifierChar:
 ;------------------------------------------------------------------
 
 ProcessSpecifierString:
-    ; r13 --> string to print
-    mov r13, [rbp]
-    ; r13 --> string
-    ; r12 will be string length
+    ; r11 --> string to print
+    mov r11, [rbp]
+    ; r11 --> string
+    ; r13 will be string length
     call StrLen
-    ; r13 --> string as it was destroyed
-    mov r13, [rbp]
-    ; rbp --> expected next argument (may not be any args)
-    add rbp, 8
+    ; r11 --> string as it was destroyed
+    mov r11, [rbp]
     ; compare string length with buffer size
-    cmp r12, PRINTF_BUFFER_SIZE
+    cmp r13, PRINTF_BUFFER_SIZE
     ; if it is bigger --> print it right to stdout with syscall
     jge .PutStrToStdout
     ; else: store string in buffer
     call PutStrInBuffer
 
-    dec rcx
-    jnz Next
+    jmp ShiftPointerToNextNormalArgument
 
 .PutStrToStdout:
     ; flush buffer before printing string
     call FlushBuffer
     ; print string
-    PutStr r13, r12
+    PutStr r11, r13
 
-    dec rcx
-    jnz Next
+    jmp ShiftPointerToNextNormalArgument
 
 ;------------------------------------------------------------------
 ; Processes case of a specifier "%d" that prints
@@ -413,16 +484,13 @@ ProcessSpecifierString:
 ProcessSpecifierDec:
     ; rax = argument integer
     mov rax, [rbp]
-    ; rbp --> expected next argument (may not be any args)
-    add rbp, 8
 
     ; save rdx as we need it for indexing float arguments
     push rdx
     call PrintDecimal
     pop rdx
 
-    dec rcx
-    jnz Next
+    jmp ShiftPointerToNextNormalArgument
 
 ;------------------------------------------------------------------
 ; Series of processing cases of specifiers "%p", "%x", "%o", "%b".
@@ -439,9 +507,6 @@ ProcessSpecifierDec:
 ; Processes case of a null pointer
 ;------------------------------------------------------------------
 ProcessNullptr:
-    ; rbp --> expected next argument (may not be any args)
-    add rbp, 8
-
     ; if nullptr:
     PutCharInBuffer '('
     PutCharInBuffer 'n'
@@ -449,8 +514,7 @@ ProcessNullptr:
     PutCharInBuffer 'l'
     PutCharInBuffer ')'
 
-    dec rcx
-    jnz Next
+    jmp ShiftPointerToNextNormalArgument
 
 ;------------------------------------------------------------------
 ; Processes case of a specifier "%p" that prints a pointer argument
@@ -473,6 +537,8 @@ ProcessSpecifierPointer:
 ;------------------------------------------------------------------
 
 ProcessSpecifierHex:
+    ; save r12 for indexing floats
+    push r12
     ; 2**4 = 16 -- degree of hex num system
     mov r12, 4
 
@@ -483,6 +549,8 @@ ProcessSpecifierHex:
 ;------------------------------------------------------------------
 
 ProcessSpecifierOct:
+    ; save r12 for indexing floats
+    push r12
     ; 2**3 = 8 -- degree of oct num system
     mov r12, 3
 
@@ -493,6 +561,8 @@ ProcessSpecifierOct:
 ;------------------------------------------------------------------
 
 ProcessSpecifierBin:
+    ; save r12 for indexing floats
+    push r12
     ; 2**1 = 2 -- degree of bin num system
     mov r12, 1
 
@@ -503,8 +573,6 @@ ProcessSpecifierBin:
 ConvertPowerOfTwoToAscii:
     ; r10 = argument integer
     mov r10, [rbp]
-    ; rbp --> expected next argument (may not be any args)
-    add rbp, 8
 
     ; have to save rcx for loop
     push rcx
@@ -514,8 +582,9 @@ ConvertPowerOfTwoToAscii:
     pop rdx
     pop rcx
 
-    dec rcx
-    jnz Next
+    pop r12
+
+    jmp ShiftPointerToNextNormalArgument
 
 ;------------------------------------------------------------------
 ; Processes case of a specifier "%f"
@@ -526,19 +595,14 @@ ProcessSpecifierFloat:
     ; get next float argument (r14 = counter of floats)
     cmp r14, 8
     jl .LessThan8FloatsWereParsed
-    ; else --> get as a normal argument from rbp
-    movsd xmm8, [rbp]
-    ; set rbp ready for getting next argument
-    add rbp, 8
+    ; else --> get as a normal argument
+    movsd xmm8, [r12 - 8 * 8 + r14 * 8]
+
     jmp .GotFloat
 
 .LessThan8FloatsWereParsed:
     ; if less than 8 args were used, they are indexed with rdx
-    movsd xmm8, [rdx]
-    ; set rdx ready for getting next float value
-    add rdx, 8
-    ; count of floats++
-    inc r14
+    movsd xmm8, [r12 - 14 * 8 + r14 * 8]
 
 .GotFloat:
     ; check for NaN and Infinity:
@@ -571,8 +635,7 @@ ProcessSpecifierFloat:
     call PrintPositiveFloat
     pop rdx
 
-    dec rcx
-    jnz Next
+    jmp ShiftPointerToNextFloatArgument
 
 ;------------------------------------------------------------------
 ; Processes case of a float argument being a NAN, INFINITY or -INFINITY
@@ -592,8 +655,7 @@ PrintFloatSpecial:
     PutCharInBuffer 'a'
     PutCharInBuffer 'n'
 
-    dec rcx
-    jnz Next
+    jmp ShiftPointerToNextFloatArgument
 
 ;------------------------------------------------------------------
 ; Processes case of a float argument being INFINITY or -INFINITY
@@ -608,8 +670,7 @@ PrintFloatSpecial:
     PutCharInBuffer 'n'
     PutCharInBuffer 'f'
 
-    dec rcx
-    jnz Next
+    jmp ShiftPointerToNextFloatArgument
 
 ;------------------------------------------------------------------
 ; Short:   Converts float to abs(float) + prints a sign in PrintfBuffer
@@ -622,10 +683,8 @@ PrintFloatSign:
     ; get mask for signed bits of packed doubles of float arg in rax
     movmskpd rax, xmm8
     ; bit for our float value should be in 0 bit, so apply the mask
-    and rax, 0x01
-    ; if positive or zero
-    cmp rax, 0
-    jne .Negative
+    test rax, 0x01
+    jnz .Negative
     ; if positive or zero than do nothing
     ret
     ; else if negative
@@ -646,7 +705,7 @@ PrintFloatSign:
 ;          with precision = PRECISION
 ; Exp:     float value >= 0
 ; In:      xmm8 = float value
-; Destroy: rax, rcx, rdx, rdi, rsi, r11, r12, r13, xmm8, xmm9
+; Destroy: rax, rcx, rdx, rdi, r11, r13, xmm8, xmm9
 ;------------------------------------------------------------------
 
 PrintPositiveFloat:
@@ -704,7 +763,7 @@ PrintPositiveFloat:
 ; In:      r10 = integer value
 ;          r12 = log_2(numerical system degree)
 ; Example: if hex numerical system ==> degree = 16 = 2**4 ==> r12 = 4
-; Destroy: rax, rcx, rdx, rdi, rsi, r10, r11, r12, r13
+; Destroy: rax, rcx, rdx, rdi, r10, r11, r12, r13
 ;------------------------------------------------------------------
 
 PrintNumberInPowerOfTwoSystem:
@@ -751,13 +810,15 @@ PrintNumberInPowerOfTwoSystem:
     lea r10, [IntBuffer]
     add r13, r10
     inc r13
+    mov r11, r13
     ; string length = end buffer ptr - start buffer ptr
     mov r12, r10
     add r12, INT_BUFFER_SIZE
     sub r12, r13
+    mov r13, r12
     ; when ended --> print buffer
-    ; r13 --> string
-    ; r12 = string length
+    ; r11 --> string
+    ; r13 = string length
     call PutStrInBuffer
 
     ret
@@ -765,10 +826,12 @@ PrintNumberInPowerOfTwoSystem:
 ;------------------------------------------------------------------
 ; Short:   Writes in printf buffer value in decimal numerical system
 ; In:      rax = integer value
-; Destroy: rax, rcx, rdx, rdi, rsi, r11, r12, r13
+; Destroy: rax, rcx, rdx, rdi, r11, r13
 ;------------------------------------------------------------------
 
 PrintDecimal:
+    push r12
+
     ; check int for zero
     ; as we can not divide by zero
     cmp eax, 0
@@ -821,22 +884,27 @@ PrintDecimal:
 
 .Done:
     ; when ended --> print buffer
-    ; r13 --> string = current_char_ptr (IntBuffer + r12) + 1
-    lea r13, [IntBuffer]
-    add r13, r12
-    inc r13
+    ; r11 --> string = current_char_ptr (IntBuffer + r12) + 1
+    lea r11, [IntBuffer]
+    add r11, r12
+    inc r11
     ; string length = int_buffer_end_ptr - current_char_ptr - 1
     ;               = INT_BUFFER_SIZE - 1 - r12
     ;               = - r12 - 1 + INT_BUFFER_SIZE
     neg r12
     add r12, INT_BUFFER_SIZE - 1
+    mov r13, r12
     ; put string in buffer as it's size is less than PRINT_BUFFER_SIZE
     call PutStrInBuffer
+
+    pop r12
 
     ret
 
 DecimalIsZero:
     PutCharInBuffer '0'
+
+    pop r12
 
     ret
 
@@ -915,3 +983,5 @@ SPEC_SYMBOL_BIN     equ 'b'
 SPEC_SYMBOL_HEX     equ 'x'
 
 ;==================================================================
+
+section .note.GNU-stack
