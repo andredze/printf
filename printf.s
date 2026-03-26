@@ -1,5 +1,5 @@
 ; directive "default rel" tells the assembler
-; to use RIP-relative addressing by default
+; to use RIP-relative addressing by default (for memory operands)
 ; for example: instead of absolute address of "MyPrintfCallAddress"
 ;              it will put RIP-relative address,
 ;              which can be written as "rel MyPrintfCallAddress"
@@ -23,8 +23,9 @@ extern printf
 %macro PutStr 2
     ; it's better to save rdx and rdi, rsi
     ; we do it because syscall is a really slow operation
-    ; because of that we will use this macro rarely
-    ; and because of that this push will not change much
+    ; so we will use this macro rarely, only when the buffer is filled
+    ; or the string is very long
+    ; Because of that, this push will not change much.
     push rdx
     push rdi
     push rsi
@@ -203,7 +204,7 @@ my_printf:
 
     ; there is no command push for xmm registers,
     ; so we have to move them right to stack
-    ; movsd = move doubleword, which
+    ; movsd = move scalar double, which
     ; allows us to mov xmm register even so it is 16 bytes long
     movsd [rsp + 8 * 0], xmm0
     movsd [rsp + 8 * 1], xmm1
@@ -245,7 +246,7 @@ my_printf:
     mov rax, [MyPrintfReturnValue]
 
     ; we have ruined the stack, so we can not ret
-    ; we saved return address in r15 so we can jump to it
+    ; we saved return address in MyPrintfCallAddress so we can jump to it
     jmp [MyPrintfCallAddress]
 
 ;-------------------<Calling Convention: cdecl>--------------------
@@ -254,7 +255,7 @@ my_printf:
 ;               If there are float arguments, first 8 of them should be in stack
 ;          at the start in reversed order.
 ;               Next float arguments should be transmitted as any other argument:
-;          [rsp + 8 * 8] --> format string (9th byte of stack)
+;          [rsp + 8 * 8] --> format string (9th qword in stack)
 ;          higher in the stack should be an argument for every specifier
 ;          of the format string (each specifier = 1 argument)
 ;          in reversed order (first argument has to be pushed last and so on)
@@ -696,7 +697,7 @@ PrintFloatSpecial:
     ; count zeros to the first bit that equals 1
     ; rdi = amount of zeros in the start of xmm8
     tzcnt rdi, rax
-    ; if the fractal part is all zeros
+    ; if the fractional part is all zeros
     cmp rdi, 52
     ; than it is infinity
     je .PrintInfinity
@@ -776,23 +777,23 @@ PrintPositiveFloat:
     pop rax
     ; convert integer part back to xmm
     cvtsi2sd xmm8, rax
-    ; xmm9 = fractal part
-    ; subtract from number it's integer part to get the fractal part
+    ; xmm9 = fractional part
+    ; subtract from number it's integer part to get the fractional part
     subsd xmm9, xmm8
-    ; get the fractal part to integer part
+    ; get the fractional part to integer part
     mulsd xmm9, [FLOAT_TEN_TO_POWER_FIVE]
-    ; convert xmm9 fractal part to integer register
+    ; convert xmm9 fractional part to integer register
     cvtsd2si rax, xmm9
     ; we should print every float with precision = 6
-    ; so if fractal part is zero --> we have to put .000000
+    ; so if fractional part is zero --> we have to put .000000
     cmp rax, 0
     je .PrintZeroFractalPart
-    ; print the fractal part
+    ; print the fractional part
     call PrintDecimal
 
     ret
 
-; zero fractal part is an exception
+; zero fractional part is an exception
 ; because when we multiply by zero it remains zero
 ; however we need to put PRECISION amount of characters
 .PrintZeroFractalPart:
@@ -1011,7 +1012,7 @@ section .rodata
 ; and frac bits to 0. It is positive so sign bit is also 0
 ; float infinity has the special token
 SPECIAL_FLOAT_EXPONENT_MASK dq __?Infinity?__
-; used for converting fractal part of a float to an integer
+; used for converting fractional part of a float to an integer
 FLOAT_TEN_TO_POWER_FIVE dq 10e+5
 ; precision for printing floats
 PRECISION           equ 6
