@@ -17,7 +17,7 @@ extern printf
 ; Short:   Writes string to stdout
 ; In:      %1 --> string to write
 ;          %2 = string length
-; Destroy: rax, rcx, r11
+; Destroy: rax, rcx
 ;------------------------------------------------------------------
 
 %macro PutStr 2
@@ -29,6 +29,7 @@ extern printf
     push rdx
     push rdi
     push rsi
+    push r11
     ; add string length to counter of chars, transmitted to stdout
     add r15, %2
     ; rax = sys_function_code = 1 = write64()
@@ -42,6 +43,8 @@ extern printf
 
     syscall
 
+    ; get saved rsi
+    pop r11
     ; get saved rsi
     pop rsi
     ; get saved rdi
@@ -116,17 +119,14 @@ PutStrInBuffer:
 ;------------------------------------------------------------------
 
 FlushBuffer:
-    push r11
     ; write buffer in stdout
     ; %1 --> printf buffer
     ; %2 = r8 = current buffer length
-    lea r11, [PrintfBuffer]
-    PutStr r11, r8
+    lea rcx, [PrintfBuffer]
+    PutStr rcx, r8
 
     ; set current buffer length = 0
     xor r8, r8
-
-    pop r11
 
     ret
 
