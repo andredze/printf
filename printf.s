@@ -320,6 +320,8 @@ Next:
     ; rbx++ --> next char
     inc rbx
 
+ContinueParsing:
+
     loop Next
 
 Done:
@@ -363,7 +365,7 @@ ShiftPointerToNextNormalArgument:
     cmp r14, 8
     jae .Parsed8OrMoreFloatArguments
     ; if we have not used 8 floats yet --> don't sync anything
-    loop Next
+    jmp ContinueParsing
 
 .Parsed8OrMoreFloatArguments:
     ; if we are taking floats from stack:
@@ -374,12 +376,12 @@ ShiftPointerToNextNormalArgument:
     ; if equal, than we have to place rbp to a current float pointer
     je .SyncNormalArgumentsWithFloatArguments
     ; if no, than don't sync anything
-    loop Next
+    jmp ContinueParsing
 
 .SyncNormalArgumentsWithFloatArguments:
     lea rbp, [r12 - 8 * 8 + r14 * 8]
 
-    loop Next
+    jmp ContinueParsing
 
 .AlreadySyncedWithFloats:
     ; if we already used more than 5 normal args,
@@ -389,7 +391,7 @@ ShiftPointerToNextNormalArgument:
     ; as we have already increased normal args ptr (rbp += 8)
     inc r14
 
-    loop Next
+    jmp ContinueParsing
 
 ;------------------------------------------------------------------
 ; (after use of a float argument)
@@ -404,8 +406,7 @@ ShiftPointerToNextFloatArgument:
     je .Exactly8FloatArgumentsUsed
     ja .MoreThan8FloatArgumentsUsed
     ; if not --> continue using normally
-    dec rcx
-    jnz Next
+    jmp ContinueParsing
 
 .Exactly8FloatArgumentsUsed:
     ; if we have not synced yet
@@ -413,8 +414,7 @@ ShiftPointerToNextFloatArgument:
     cmp rsi, 5
     jge .SyncFloatWithNormalArguments
     ; if have not used, than do nothing
-    dec rcx
-    jnz Next
+    jmp ContinueParsing
 
 .SyncFloatWithNormalArguments:
     ; else: r14 = rsi - 5, so that floats will be
@@ -423,8 +423,7 @@ ShiftPointerToNextFloatArgument:
     add r14, rsi
     sub r14, 5
 
-    dec rcx
-    jnz Next
+    jmp ContinueParsing
 
 .MoreThan8FloatArgumentsUsed:
     ; if we used all xmm0-xmm7 from stack
@@ -432,15 +431,13 @@ ShiftPointerToNextFloatArgument:
     jge .Used5OrMoreNormalArguments
     ; else if we had not used 5 normal arguments
     ; than we don't need to sync anything
-    dec rcx
-    jnz Next
+    jmp ContinueParsing
 
 .Used5OrMoreNormalArguments:
     ; than we have to sync with normal arguments pointer (rbp)
     add rbp, 8
 
-    dec rcx
-    jnz Next
+    jmp ContinueParsing
 
 ;------------------------------------------------------------------
 ; Parses one specifier in the format string
@@ -482,8 +479,7 @@ ProcessSpecifierWrong:
     ; (as default libc print does that some times)
     PutCharInBuffer SPEC_SYMBOL_START
 
-    dec rcx
-    jnz Next
+    jmp ContinueParsing
 
 ;------------------------------------------------------------------
 ; Processes case of a specifier "%c" that is putting a char from an argument
