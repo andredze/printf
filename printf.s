@@ -25,7 +25,7 @@ extern printf
     ; we do it because syscall is a really slow operation
     ; so we will use this macro rarely, only when the buffer is filled
     ; or the string is very long
-    ; Because of that, this push will not change much.
+    ; Because of that, this push will not affect the speed much.
     push rdx
     push rdi
     push rsi
@@ -43,13 +43,10 @@ extern printf
 
     syscall
 
-    ; get saved rsi
+    ; get saved registers
     pop r11
-    ; get saved rsi
     pop rsi
-    ; get saved rdi
     pop rdi
-    ; get saved rdx
     pop rdx
 
 %endmacro
@@ -982,7 +979,7 @@ IntBuffer           times INT_BUFFER_SIZE db 0x00
 ; it is made to do less syscalls
 ; Buffer allows to make syscall only when it filled
 ; it is done with the FlushBuffer function
-PRINTF_BUFFER_SIZE  equ 32
+PRINTF_BUFFER_SIZE  equ 256
 PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
 
 ; It is a jump table for handling different specifiers in my_printf function
