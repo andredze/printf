@@ -42,19 +42,19 @@ InFrameStart "Building test_my_printf"
 # ------------------------------------------------------------------ #
 
 InFrameDoing "Compiling assembler code printf.s..."
-nasm -f elf64 -g -F dwarf -l printf.lst printf.s
+nasm -f elf64 -l printf.lst printf.s
 InFrameSuccess "Compiling assembler code printf.s..."
 
 # ------------------------------------------------------------------ #
 
 InFrameDoing "Compiling test.cpp"
-g++ -g -c test.cpp -I googletest/googletest/include -o test.o
+g++ -c test.cpp -I googletest/googletest/include -o test.o
 InFrameSuccess "Compiling test.cpp"
 
 # ------------------------------------------------------------------ #
 
 InFrameDoing "Linking"
-g++ -g -fPIE test.o printf.o googletest/build/lib/libgtest.a -o test
+g++ -fPIE test.o printf.o googletest/build/lib/libgtest.a -o test
 InFrameSuccess "Linking"
 
 # ------------------------------------------------------------------ #

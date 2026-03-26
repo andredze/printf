@@ -238,8 +238,7 @@ my_printf:
     ; rax = r10 (count of float's parsed from xmm registers)
     mov rax, r10
     ; wrt ..plt stands for with reference to procedure linkage table (plt)
-    ; within the plt there is code to jump to offsets contained in the GOT
-    ; GOT = global offset table
+    ; within the plt there is code to jump to
     call printf wrt ..plt
 
     ; get my_printf return value
@@ -860,10 +859,9 @@ PrintNumberInPowerOfTwoSystem:
     inc r13
     mov r11, r13
     ; string length = end buffer ptr - start buffer ptr
-    mov r12, r10
-    add r12, INT_BUFFER_SIZE
-    sub r12, r13
-    mov r13, r12
+    neg r13
+    add r13, r10
+    add r13, INT_BUFFER_SIZE
     ; when ended --> print buffer
     ; r11 --> string
     ; r13 = string length
