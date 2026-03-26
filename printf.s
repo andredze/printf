@@ -112,10 +112,11 @@ PutStrInBuffer:
 ; In:      r8 = number of characters in buffer that were filled
 ;          (it exists to not write all buffer in stdout if we don't need to)
 ; Out:     r8 = 0
-; Destroy: rax, rcx, r11
+; Destroy: rax, rcx
 ;------------------------------------------------------------------
 
 FlushBuffer:
+    push r11
     ; write buffer in stdout
     ; %1 --> printf buffer
     ; %2 = r8 = current buffer length
@@ -124,6 +125,8 @@ FlushBuffer:
 
     ; set current buffer length = 0
     xor r8, r8
+
+    pop r11
 
     ret
 
@@ -979,7 +982,7 @@ IntBuffer           times INT_BUFFER_SIZE db 0x00
 ; it is made to do less syscalls
 ; Buffer allows to make syscall only when it filled
 ; it is done with the FlushBuffer function
-PRINTF_BUFFER_SIZE  equ 2048
+PRINTF_BUFFER_SIZE  equ 32
 PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
 
 ; It is a jump table for handling different specifiers in my_printf function
