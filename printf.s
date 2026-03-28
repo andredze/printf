@@ -555,11 +555,11 @@ ProcessSpecifierDec:
 ;------------------------------------------------------------------
 ProcessNullptr:
     ; if nullptr:
-    PutCharInBuffer '('
-    PutCharInBuffer 'n'
-    PutCharInBuffer 'i'
-    PutCharInBuffer 'l'
-    PutCharInBuffer ')'
+    ; print string = "(nil)"
+    lea r11, [NIL_STRING]
+    mov r13, NIL_STRING_LENGTH
+
+    call PutStrInBuffer
 
     jmp ShiftPointerToNextNormalArgument
 
@@ -698,9 +698,11 @@ PrintFloatSpecial:
     je .PrintInfinity
 
     ; else it is nan
-    PutCharInBuffer 'n'
-    PutCharInBuffer 'a'
-    PutCharInBuffer 'n'
+    ; print string = "nan"
+    lea r11, [NAN_STRING]
+    mov r13, NAN_STRING_LENGTH
+    
+    call PutStrInBuffer
 
     jmp ShiftPointerToNextFloatArgument
 
@@ -712,10 +714,11 @@ PrintFloatSpecial:
     ; print the sign as inf can be signed
     call PrintFloatSign
 
-    ; print the "inf" string
-    PutCharInBuffer 'i'
-    PutCharInBuffer 'n'
-    PutCharInBuffer 'f'
+    ; print string = "inf"
+    lea r11, [INF_STRING]
+    mov r13, INF_STRING_LENGTH
+    
+    call PutStrInBuffer
 
     jmp ShiftPointerToNextFloatArgument
 
@@ -1000,6 +1003,18 @@ SPECIFIERS_JUMP_TABLE dq ProcessSpecifierBin      ; 'b'
 section .rodata
 
 ;==================================================================
+
+; printf output in case of a nullptr with %p specifier
+NIL_STRING          db "(nil)"
+NIL_STRING_LENGTH   equ $-NIL_STRING
+
+; printf output in case of a infinity float value with %f specifier
+INF_STRING          db "inf"
+INF_STRING_LENGTH   equ $-INF_STRING
+
+; printf output in case of a NaN float value with %f specifier
+NAN_STRING          db "nan"
+NAN_STRING_LENGTH   equ $-NAN_STRING
 
 ; constant for comparing float with inf and nan
 ; infinity will do the job because it sets all exponent bits to 1,

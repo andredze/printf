@@ -48,13 +48,13 @@ InFrameSuccess "Compiling assembler code printf.s..."
 # ------------------------------------------------------------------ #
 
 InFrameDoing "Compiling test.cpp"
-g++ -c test.cpp -I googletest/googletest/include -o test.o
+g++ -fPIE -c test.cpp -I googletest/googletest/include -o test.o
 InFrameSuccess "Compiling test.cpp"
 
 # ------------------------------------------------------------------ #
 
 InFrameDoing "Linking"
-g++ -fPIE test.o printf.o googletest/build/lib/libgtest.a -o test
+g++ -pie test.o printf.o googletest/build/lib/libgtest.a -o test
 InFrameSuccess "Linking"
 
 # ------------------------------------------------------------------ #
