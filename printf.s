@@ -466,7 +466,7 @@ ParseSpecifier:
     ; SPEC_SYMBOL_BIN character (first specifier)
     ; * 8 as pointers are stored with 8 bytes (64 bit architecture)
     lea r11, [SPECIFIERS_JUMP_TABLE]
-    jmp [r11 - (r9 - SPEC_SYMBOL_BIN) * 8]
+    jmp [r11 + (r9 - SPEC_SYMBOL_BIN) * 8]
 
 ;------------------------------------------------------------------
 ; Processes case when the wrong character after "%" was given
