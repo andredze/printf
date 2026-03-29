@@ -1,7 +1,10 @@
 #include <stdio.h>
 #include <math.h>
+#include <gtest/gtest.h>
 #include "test.h"
-#include "googletest/googletest/include/gtest/gtest.h"
+// #include "googletest/googletest/include/gtest/gtest.h"
+
+//------------------------------------------------------------------//
 
 extern "C" int
 my_printf(const char* format, ...)__attribute__((format(printf, 1, 2)));

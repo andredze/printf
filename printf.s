@@ -249,7 +249,7 @@ my_printf:
     jmp [MyPrintfCallAddress]
 
 ;-------------------<Calling Convention: cdecl>--------------------
-; Short:   My "printf" function realisation with cdecl calling convention
+; Short:   My "printf" function implementation with cdecl calling convention
 ; In:      all arguments should be pushed in stack:
 ;               If there are float arguments, first 8 of them should be in stack
 ;          at the start in reversed order.
@@ -845,6 +845,7 @@ PrintNumberInPowerOfTwoSystem:
 .Letter:
     ; convert to ascii if letter --> add 'a' to a number but - 10 as ('a' = 10)
     add r11, 'a' - 10
+    
 .DoneConvert:
     ; store char in IntBuffer in reversed order
     lea r12, [IntBuffer]

@@ -5,29 +5,20 @@
 BLUE_COLOR='\033[0;34m'
 GREEN_COLOR='\033[0;32m'
 YELLOW_COLOR='\033[1;33m'
-
 RESET_COLOR='\033[0m'
 
 # ------------------------------------------------------------------ #
 
-InFrameStart()
+RunCommand()
 {
-    printf "${BLUE_COLOR}[ START ]${RESET_COLOR} %s\n" "$1"
-}
+    local message="$1"
+    shift
 
-InFrameDoing()
-{
-    printf "${YELLOW_COLOR}[ DOING ]${RESET_COLOR} %s\n" "$1"
-}
-
-InFrameSuccess()
-{
-    printf "${GREEN_COLOR}[SUCCESS]${RESET_COLOR} %s\n" "$1"
-}
-
-InFrameDone()
-{
-    printf "${BLUE_COLOR}[ DONE  ]${RESET_COLOR} %s\n" "$1"
+    printf "${YELLOW_COLOR}[ DOING ]${RESET_COLOR} %s\n\t" "$message"
+    set -x
+    "$@"
+    { set +x; } 2>/dev/null
+    printf "${GREEN_COLOR}[SUCCESS]${RESET_COLOR} %s\n" "$message"
 }
 
 # ------------------------------------------------------------------ #
@@ -37,29 +28,14 @@ set -e
 
 # ------------------------------------------------------------------ #
 
-InFrameStart "Building test_my_printf"
+RunCommand "Compiling assembler code printf.s..." \
+    nasm -f elf64 -l printf.lst printf.s
 
-# ------------------------------------------------------------------ #
+RunCommand "Compiling test.cpp" \
+    g++ -fPIE -pthread -c test.cpp -o test.o
 
-InFrameDoing "Compiling assembler code printf.s..."
-nasm -f elf64 -l printf.lst printf.s
-InFrameSuccess "Compiling assembler code printf.s..."
-
-# ------------------------------------------------------------------ #
-
-InFrameDoing "Compiling test.cpp"
-g++ -fPIE -c test.cpp -I googletest/googletest/include -o test.o
-InFrameSuccess "Compiling test.cpp"
-
-# ------------------------------------------------------------------ #
-
-InFrameDoing "Linking"
-g++ -pie test.o printf.o googletest/build/lib/libgtest.a -o test
-InFrameSuccess "Linking"
-
-# ------------------------------------------------------------------ #
-
-InFrameDone "Built test_my_printf"
+RunCommand "Linking" \
+    g++ -pie -pthread test.o printf.o -lgtest -o test
 
 # ------------------------------------------------------------------ #
 
