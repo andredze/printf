@@ -374,7 +374,8 @@ ShiftPointerToNextNormalArgument:
     jmp ContinueParsing
 
 .SyncNormalArgumentsWithFloatArguments:
-    lea rbp, [r12 - 8 * 8 + r14 * 8]
+    ; rbp --> current next float register (the ptrs are equal now)
+    lea rbp, [r12 + (r14 - 8) * 8]
 
     jmp ContinueParsing
 
