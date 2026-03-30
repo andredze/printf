@@ -42,5 +42,4 @@ RunCommand "Linking" \
 
 # ------------------------------------------------------------------ #
 
-# g++ -pie -pthread call_complex.cpp print_complex_float.o printf.o -o call_test
 # ld -melf_x86_64 --dynamic-linker=/lib64/ld-linux-x86-64.so.2 printf.o -lc -o printf

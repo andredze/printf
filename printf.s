@@ -584,10 +584,10 @@ ProcessSpecifierPointer:
 ProcessSpecifierHex:
     ; save rcx for iterating loop
     push rcx
-    ; 2**4 = 16 -- degree of hex num system
-    mov cl, 4
-    ; dl = mask for getting lowest digit
-    mov dl, 0x0F
+    ; 2**4 = 16 (degree of hex num system)
+    ; ==> cl = 0x04 (power of 2)
+    ;     ch = 0x0F (mask for getting 1 hex digit)
+    mov cx, 0x0F04
 
     jmp ConvertPowerOfTwoToAscii
 
@@ -598,10 +598,10 @@ ProcessSpecifierHex:
 ProcessSpecifierOct:
     ; save rcx for iterating loop
     push rcx
-    ; 2**3 = 8 -- degree of oct num system
-    mov cl, 3
-    ; dl = mask for getting lowest digit
-    mov dl, 0x07
+    ; 2**3 = 8 (degree of oct num system)
+    ; ==> cl = 0x03 (power of 2)
+    ;     ch = 0x07 (mask for getting 1 octal digit)
+    mov cx, 0x0703
 
     jmp ConvertPowerOfTwoToAscii
 
@@ -612,10 +612,10 @@ ProcessSpecifierOct:
 ProcessSpecifierBin:
     ; save rcx for iterating loop
     push rcx
-    ; 2**1 = 2 -- degree of bin num system
-    mov cl, 1
-    ; dl = mask for getting lowest digit
-    mov dl, 0x01
+    ; 2**1 = 2 (degree of bin num system)
+    ; ==> cl = 0x01 (power of 2)
+    ;     ch = 0x01 (mask for getting 1 bit)
+    mov cx, 0x0101
 
     ; fallthrough
 
@@ -867,7 +867,7 @@ PrintPositiveFloat:
 ;          DEGREE OF NUMERICAL SYSTEM SHOULD BE A POWER OF 2
 ; In:      r10 = integer value
 ;          cl = log_2(numerical system degree)
-;          dl = mask for getting lowest digit of a number
+;          ch = mask for getting lowest digit of a number
 ;               (hex:0x0F, oct:0x07, bin:0x01)
 ; Example: if hex numerical system ==> degree = 16 = 2**4 ==> cl = 4
 ; Destroy: rax, r10, r11, r13
@@ -876,7 +876,8 @@ PrintPositiveFloat:
 PrintNumberInPowerOfTwoSystem:
     ; r13 used for indexing buffer
     mov r13, INT_BUFFER_SIZE - 1
-
+    ; move mask in dl, because REX instructions only support lower register bytes 
+    mov dl, ch
 .NextByte:
     ; store lowest byte in dil
     mov dil, r10b
