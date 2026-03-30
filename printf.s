@@ -22,8 +22,8 @@ extern printf
 ; Destroy: rax, rcx
 ;------------------------------------------------------------------
 
-%macro PutStr 2
-    ; it's better to save rdx and rdi, rsi
+%macro mPutStr 2
+    ; it's better to save rdx, rdi, rsi, r11
     ; we do it because syscall is a really slow operation
     ; so we will use this macro rarely, only when the buffer is filled
     ; or the string is very long
@@ -63,7 +63,7 @@ extern printf
 ; Destroy: rax, rcx, r11
 ;------------------------------------------------------------------
 
-%macro PutCharInBuffer 1
+%macro mPutCharInBuffer 1
     ; put char at PrintfBuffer + current buffer length (r8)
     lea rax, [PrintfBuffer]
     mov byte [rax + r8], %1
@@ -98,7 +98,7 @@ PutStrInBuffer:
 .Next:
     mov rcx, [r11]
     ; print current char in buffer
-    PutCharInBuffer cl
+    mPutCharInBuffer cl
     ; go to next char (string_ptr++)
     inc r11
     ; string_length--
@@ -122,7 +122,7 @@ FlushBuffer:
     ; %1 --> printf buffer
     ; %2 = r8 = current buffer length
     lea rcx, [PrintfBuffer]
-    PutStr rcx, r8
+    mPutStr rcx, r8
 
     ; set current buffer length = 0
     xor r8, r8
@@ -313,7 +313,7 @@ Next:
     cmp byte r9b, SPEC_SYMBOL_START
     je ParseSpecifier
     ; write curr_symbol to stdout
-    PutCharInBuffer r9b
+    mPutCharInBuffer r9b
     ; rbx++ --> next char
     inc rbx
 
@@ -475,7 +475,7 @@ ProcessSpecifierWrong:
     ; just print the SPEC_SYMBOL_START
     ; if it was escaped or it was the wrong spec
     ; (as default libc print does that some times)
-    PutCharInBuffer SPEC_SYMBOL_START
+    mPutCharInBuffer SPEC_SYMBOL_START
 
     jmp ContinueParsing
 
@@ -487,7 +487,7 @@ ProcessSpecifierChar:
     ; write "%c" argument (arguments are stored in stack)
     ; rbp --> char to write
     movzx r11, byte [rbp]
-    PutCharInBuffer r11b
+    mPutCharInBuffer r11b
 
     jmp ShiftPointerToNextNormalArgument
 
@@ -518,7 +518,7 @@ ProcessSpecifierString:
     ; flush buffer before printing string
     call FlushBuffer
     ; print string
-    PutStr r11, r13
+    mPutStr r11, r13
 
     jmp ShiftPointerToNextNormalArgument
 
@@ -530,10 +530,9 @@ ProcessSpecifierString:
 ProcessSpecifierDec:
     ; rax = argument integer
     mov rax, [rbp]
-
     ; save rdx as we need it for indexing float arguments
     push rdx
-    call PrintDecimal
+    call PrintDecimal32Bit
     pop rdx
 
     jmp ShiftPointerToNextNormalArgument
@@ -573,8 +572,8 @@ ProcessSpecifierPointer:
 
     ; with '%p' specifier,
     ; at the start of a hex value there is "0x"
-    PutCharInBuffer '0'
-    PutCharInBuffer 'x'
+    mPutCharInBuffer '0'
+    mPutCharInBuffer 'x'
 
     ; fallthrough
 
@@ -685,13 +684,13 @@ ProcessSpecifierFloat:
     ; save float value in xmm9 so that xmm8 won't be ruined
     movsd xmm9, xmm8
     movsd xmm10, [MAX_FLOAT_FILLING_INTO_INTEGER]
-    ; (first_op <= second_op) ? (first_op = all 1s) : (first_op = all 0s) 
-    cmplesd xmm9, xmm10
+    ; (first_op < second_op) ? (first_op = all 1s) : (first_op = all 0s) 
+    cmpltsd xmm9, xmm10
     ; save result of operation in rdi
     movq rdi, xmm9
     ; check for zero:
     test rdi, rdi
-    ; if zero, than (first_op > second_op), than it is a "complex float"
+    ; if zero, than (first_op >= second_op), than it is a "complex float"
     jz ProcessComplexFloat
 
     call PrintPositiveFloat
@@ -795,7 +794,7 @@ PrintFloatSign:
     ; else if negative
 .Negative:
     ; print minus sign
-    PutCharInBuffer '-'
+    mPutCharInBuffer '-'
     ; convert xmm8 to it's negative
     movq rax, xmm8
     ; set sign bit to 0 --> positive
@@ -824,9 +823,9 @@ PrintPositiveFloat:
     ; print the integer part
     ; save rdx as we need it for indexing float arguments
     push rax
-    call PrintDecimal
+    call PrintPositiveDecimal
     ; print point
-    PutCharInBuffer '.'
+    mPutCharInBuffer '.'
 
     pop rax
     ; convert integer part back to xmm
@@ -843,7 +842,7 @@ PrintPositiveFloat:
     cmp rax, 0
     je .PrintZeroFractalPart
     ; print the fractional part
-    call PrintDecimal
+    call PrintPositiveDecimal
 
     ret
 
@@ -856,7 +855,7 @@ PrintPositiveFloat:
 
 .Next:
     ; print ASCII zero
-    PutCharInBuffer '0'
+    mPutCharInBuffer '0'
 
     dec rdi
     jnz .Next
@@ -924,30 +923,43 @@ PrintNumberInPowerOfTwoSystem:
     ret
 
 ;------------------------------------------------------------------
-; Short:   Writes in printf buffer value in decimal numerical system
+; Short:   Writes in printf buffer value in decimal numerical system 
+;          (supports only 32 bit integers, can be signed)
 ; In:      rax = integer value
 ; Destroy: rax, rcx, rdx, rdi, r11, r13
 ;------------------------------------------------------------------
 
-PrintDecimal:
-    push r12
-
-    ; check int for zero
-    ; as we can not divide by zero
-    cmp eax, 0
-    je DecimalIsZero
+PrintDecimal32Bit:
     ; check int sign for negatives
     cmp eax, 0
     jge .DoneWithSign
     ; if negative --> print '-' and convert to positive
     ; print '-'
     push rax
-    PutCharInBuffer '-'
+    mPutCharInBuffer '-'
     pop rax
-    ; convert integer to positive
+    ; if 32 bit --> neg 4 bytes
     neg eax
 
 .DoneWithSign:
+    ; tail call
+    jmp PrintPositiveDecimal
+
+;------------------------------------------------------------------
+; Short:   Writes in printf buffer value in decimal numerical system 
+;          (only non-negative integers)
+; In:      rax = integer value
+; Destroy: rax, rcx, rdx, rdi, r11, r13
+;------------------------------------------------------------------
+
+PrintPositiveDecimal:
+    push r12
+    
+    ; check int for zero
+    ; as we can not divide by zero
+    cmp eax, 0
+    je .DecimalIsZero
+
     ; r12 will be used for indexing buffer (from the end)
     mov r12, INT_BUFFER_SIZE - 1
     ; rdi = MAX_ITERS_COUNT
@@ -1001,8 +1013,8 @@ PrintDecimal:
 
     ret
 
-DecimalIsZero:
-    PutCharInBuffer '0'
+.DecimalIsZero:
+    mPutCharInBuffer '0'
 
     pop r12
 
@@ -1055,7 +1067,10 @@ section .rodata
 
 ;==================================================================
 
-MAX_FLOAT_FILLING_INTO_INTEGER dq 4.294967296e9
+; This float constant is for determining, when the float is "complex". It equal to 2^63
+; (too big to fit it's integer part in 64-bit general purpose register)
+MAX_FLOAT_FILLING_INTO_INTEGER dq 9.223372036854775808e18
+
 ; printf output in case of a nullptr with %p specifier
 NIL_STRING          db "(nil)"
 NIL_STRING_LENGTH   equ $-NIL_STRING
