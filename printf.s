@@ -161,25 +161,21 @@ StrLen:
 ; Short:   My analog to libC printf function.
 ;          This is a trampoline to cdecl_printf,
 ;          where the actual function implementation is.
-; In:      0) rdi --> format string
-;             after that should be the arguments for every specifier
-;             of the format string in such order (each specifier = 1 argument)
-;          1)  rsi
-;          2)  rdx
-;          3)  rcx
-;          4)  r8
-;          5)  r9
-;          6+) pushed in stack in reversed order
 ;
-;          floats are transferred in xmm registers in right order:
-;          0-7) xmm0 - xmm7
-;             if there are more, they are put in stack
-;             like any other type of arguments
+; In:      Parameters to functions are passed in via the registers
+;          rdi, rsi, rdx, rcx, r8, and r9.
+;          Floating-point parameters are passed in via xmm0 through xmm7. 
+;          Any additional arguments that do not fit in these registers 
+;          are passed on the stack in reverse order. 
+;          
+;          rdi --> format string
+;          All other arguments should be specifying data to print.
+;
 ; Out:     rax = number of characters transmitted to stdout
-; Destroy: rax, r10, r11
+; Destroy: r10, r11
 ; Note:    used System V ABI for x86-64
 ;------------------------------------------------------------------
-; Should be saved according to documentation:
+; Callee saved registers:
 ; rbx, rsp, rbp, r12, r13, r14, r15
 ;------------------------------------------------------------------
 
@@ -670,9 +666,9 @@ ProcessSpecifierFloat:
     not rdi
     ; extract only the exponent bits
     ; (set other bits to zero)
-    and rdi, [SPECIAL_FLOAT_EXPONENT_MASK]
+    mov r11, SPECIAL_FLOAT_EXPONENT_MASK
+    test rdi, r11
     ; if the result is zero --> than we have a special value
-    cmp rdi, 0
     je PrintFloatSpecial
 
     ; else --> we have a normal float
@@ -690,7 +686,7 @@ ProcessSpecifierFloat:
 
 PrintFloatSpecial:
     ; count zeros to the first bit that equals 1
-    ; rdi = amount of zeros in the start of xmm8
+    ; rdi = amount of zeros in the start of rax (from xmm8)
     tzcnt rdi, rax
     ; if the fractional part is all zeros
     cmp rdi, 52
@@ -1018,10 +1014,10 @@ NAN_STRING          db "nan"
 NAN_STRING_LENGTH   equ $-NAN_STRING
 
 ; constant for comparing float with inf and nan
+; It equals to __?Infinity?__
 ; infinity will do the job because it sets all exponent bits to 1,
 ; and frac bits to 0. It is positive so sign bit is also 0
-; float infinity has the special token
-SPECIAL_FLOAT_EXPONENT_MASK dq __?Infinity?__
+SPECIAL_FLOAT_EXPONENT_MASK equ 0x7FF0000000000000
 ; used for converting fractional part of a float to an integer
 FLOAT_TEN_TO_POWER_FIVE dq 10e+5
 ; precision for printing floats
