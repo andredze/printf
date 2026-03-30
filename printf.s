@@ -639,13 +639,17 @@ ProcessSpecifierFloat:
     cmp r14, 8
     jl .LessThan8FloatsWereParsed
     ; else --> get as a normal argument
-    movsd xmm8, [r12 - 8 * 8 + r14 * 8]
+    ; shift from stack arguments start 
+    ; (-8 because first 8 arguments were before)
+    movsd xmm8, [r12 + (r14 - 8) * 8]
 
     jmp .GotFloat
 
 .LessThan8FloatsWereParsed:
     ; if less than 8 args were used, they are indexed with rdx
-    movsd xmm8, [r12 - 14 * 8 + r14 * 8]
+    ; (current_float_arg -8 xmm regs -6 normal regs) * 8
+    ; when r12 --> start of stack arguments
+    movsd xmm8, [r12 + (r14 - (8 + 6)) * 8]
 
 .GotFloat:
     ; check for NaN and Infinity:
