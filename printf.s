@@ -10,6 +10,8 @@ global my_printf
 
 section .text
 
+extern PrintComplexFloat
+
 extern printf
 
 ;==================================================================
@@ -443,7 +445,7 @@ ParseSpecifier:
     ; skip SPEC_SYMBOL ("%")
     inc rbx
     ; r9b = specifier symbol character
-    mov r9b, byte [rbx]
+    movzx r9, byte [rbx]
     ; skip specifier symbol character
     inc rbx
 
@@ -581,10 +583,12 @@ ProcessSpecifierPointer:
 ;------------------------------------------------------------------
 
 ProcessSpecifierHex:
-    ; save r12 for indexing floats
-    push r12
+    ; save rcx for iterating loop
+    push rcx
     ; 2**4 = 16 -- degree of hex num system
-    mov r12, 4
+    mov cl, 4
+    ; dl = mask for getting lowest digit
+    mov dl, 0x0F
 
     jmp ConvertPowerOfTwoToAscii
 
@@ -593,10 +597,12 @@ ProcessSpecifierHex:
 ;------------------------------------------------------------------
 
 ProcessSpecifierOct:
-    ; save r12 for indexing floats
-    push r12
+    ; save rcx for iterating loop
+    push rcx
     ; 2**3 = 8 -- degree of oct num system
-    mov r12, 3
+    mov cl, 3
+    ; dl = mask for getting lowest digit
+    mov dl, 0x07
 
     jmp ConvertPowerOfTwoToAscii
 
@@ -605,10 +611,12 @@ ProcessSpecifierOct:
 ;------------------------------------------------------------------
 
 ProcessSpecifierBin:
-    ; save r12 for indexing floats
-    push r12
+    ; save rcx for iterating loop
+    push rcx
     ; 2**1 = 2 -- degree of bin num system
-    mov r12, 1
+    mov cl, 1
+    ; dl = mask for getting lowest digit
+    mov dl, 0x01
 
     ; fallthrough
 
@@ -618,15 +626,9 @@ ConvertPowerOfTwoToAscii:
     ; r10 = argument integer
     mov r10, [rbp]
 
-    ; have to save rcx for loop
-    push rcx
-    ; save rdx as we need it for indexing float arguments
-    push rdx
     call PrintNumberInPowerOfTwoSystem
-    pop rdx
+    ; restore pushed rcx for loop
     pop rcx
-
-    pop r12
 
     jmp ShiftPointerToNextNormalArgument
 
@@ -679,9 +681,61 @@ ProcessSpecifierFloat:
     ; else --> we have a normal float
     call PrintFloatSign
 
-    push rdx
+    ; check for complex floats
+    ; save float value in xmm9 so that xmm8 won't be ruined
+    movsd xmm9, xmm8
+    movsd xmm10, [MAX_FLOAT_FILLING_INTO_INTEGER]
+    ; (first_op <= second_op) ? (first_op = all 1s) : (first_op = all 0s) 
+    cmplesd xmm9, xmm10
+    ; save result of operation in rdi
+    movq rdi, xmm9
+    ; check for zero:
+    test rdi, rdi
+    ; if zero, than (first_op > second_op), than it is a "complex float"
+    jz ProcessComplexFloat
+
     call PrintPositiveFloat
-    pop rdx
+
+    jmp ShiftPointerToNextFloatArgument
+
+;------------------------------------------------------------------
+; Processes case when the float value is too big 
+; to fit integer part in the 64 bit register as an integer
+;------------------------------------------------------------------
+
+ProcessComplexFloat:
+    ; flush the buffer first, as we will print in stdout in PrintComplexFloat
+    call FlushBuffer
+
+    ; !!!!!!!!!!!!!!!! we have to align stack by 16 bytes !!!!!!!!!!!!!!
+    push rcx
+    push rsi
+    push r8
+    push r12
+    ; save xmms (for calling libC printf after)
+    ; first 8 for storing xmm0, second 8 for storing xmm1
+    sub rsp, (8 * 2 + 8)
+
+    movsd [rsp + 8], xmm1
+    movsd [rsp + 0], xmm0
+    ; put current float argument in xmm0 for PrintComplexFloat
+    movsd xmm0, xmm8
+
+    call PrintComplexFloat
+    
+    ; restore xmms
+    movsd xmm0, [rsp + 0]
+    movsd xmm1, [rsp + 8]
+    ; restore stack
+    add rsp, (8 * 2 + 8)
+    
+    pop r12
+    pop r8
+    pop rsi
+    pop rcx
+    
+    ; add count of chars transmitted to stdout
+    add r15, rax
 
     jmp ShiftPointerToNextFloatArgument
 
@@ -766,6 +820,7 @@ PrintPositiveFloat:
     ; convert float value to integer with no rounding (get the integer part)
     ; (with double precision)
     cvttsd2si rax, xmm8
+
     ; print the integer part
     ; save rdx as we need it for indexing float arguments
     push rax
@@ -812,45 +867,38 @@ PrintPositiveFloat:
 ; Short:   Writes in printf buffer value converted to desired numerical system
 ;          DEGREE OF NUMERICAL SYSTEM SHOULD BE A POWER OF 2
 ; In:      r10 = integer value
-;          r12 = log_2(numerical system degree)
-; Example: if hex numerical system ==> degree = 16 = 2**4 ==> r12 = 4
-; Destroy: rax, rcx, rdx, rdi, r10, r11, r12, r13
+;          cl = log_2(numerical system degree)
+;          dl = mask for getting lowest digit of a number
+;               (hex:0x0F, oct:0x07, bin:0x01)
+; Example: if hex numerical system ==> degree = 16 = 2**4 ==> cl = 4
+; Destroy: rax, r10, r11, r13
 ;------------------------------------------------------------------
 
 PrintNumberInPowerOfTwoSystem:
-    ; get rdi = mask for getting lowest part of number
-    ; (hex:0x0F, oct:0x08, bin:0x01)
-    mov rcx, r12
-    ; rdi = 1
-    mov rdi, 1
-    ; rdi = 2 ** cl
-    shl rdi, cl
-    ; rdi = 2 ** cl - 1
-    dec rdi
     ; r13 used for indexing buffer
     mov r13, INT_BUFFER_SIZE - 1
 
 .NextByte:
-    ; copy to r11
-    mov r11, r10
-    ; get lowest byte
-    and r11, rdi
+    ; store lowest byte in dil
+    mov dil, r10b
+    ; get lowest digit
+    and dil, dl
 
-    cmp r11, 0x0a
-    ; if (r11 >= 0x0a) --> convert letter
+    cmp dil, 0x0a
+    ; if (dil >= 0x0a) --> convert letter
     jge .Letter
     ; convert to ascii if digit --> add '0' to a number
-    add r11, '0'
+    add dil, '0'
     ; skip converting letter
     jmp .DoneConvert
 .Letter:
     ; convert to ascii if letter --> add 'a' to a number but - 10 as ('a' = 10)
-    add r11, 'a' - 10
-    
+    add dil, 'a' - 10
+
 .DoneConvert:
     ; store char in IntBuffer in reversed order
-    lea r12, [IntBuffer]
-    mov byte [r12 + r13], r11b
+    lea r11, [IntBuffer]
+    mov byte [r11 + r13], dil
     ; go to storing next char (r13--)
     dec r13
     ; move to the next byte
@@ -858,15 +906,16 @@ PrintNumberInPowerOfTwoSystem:
     ; if not zero --> continue
     cmp r10, 0
     jne .NextByte
-    ; r13 --> start of buffer str
-    lea r10, [IntBuffer]
-    add r13, r10
-    inc r13
-    mov r11, r13
-    ; string length = end buffer ptr - start buffer ptr
+
+    ; r11 --> start of buffer str
+    add r11, r13
+    inc r11
+    ; r13 = BufferSize - StringLength - 1
+    ; => StringLength = -r13 + BufferSize - 1
     neg r13
-    add r13, r10
     add r13, INT_BUFFER_SIZE
+    dec r13
+    
     ; when ended --> print buffer
     ; r11 --> string
     ; r13 = string length
@@ -1006,6 +1055,7 @@ section .rodata
 
 ;==================================================================
 
+MAX_FLOAT_FILLING_INTO_INTEGER dq 4.294967296e9
 ; printf output in case of a nullptr with %p specifier
 NIL_STRING          db "(nil)"
 NIL_STRING_LENGTH   equ $-NIL_STRING

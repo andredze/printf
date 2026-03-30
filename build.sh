@@ -29,14 +29,18 @@ set -e
 # ------------------------------------------------------------------ #
 
 RunCommand "Compiling assembler code printf.s..." \
-    nasm -f elf64 -l printf.lst printf.s
+    nasm -f elf64 -g -F dwarf -l printf.lst printf.s
+
+RunCommand "Compiling code for printing complex floats..." \
+    g++ -fPIE -pthread -g -c print_complex_float.cpp -o print_complex_float.o
 
 RunCommand "Compiling test.cpp" \
     g++ -fPIE -pthread -c test.cpp -o test.o
 
 RunCommand "Linking" \
-    g++ -pie -pthread test.o printf.o -lgtest -o test
+    g++ -pie -pthread print_complex_float.o printf.o test.o -lgtest -o test
 
 # ------------------------------------------------------------------ #
 
+# g++ -pie -pthread call_complex.cpp print_complex_float.o printf.o -o call_test
 # ld -melf_x86_64 --dynamic-linker=/lib64/ld-linux-x86-64.so.2 printf.o -lc -o printf
