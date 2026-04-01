@@ -60,7 +60,7 @@ extern printf
 ; In:      %1 = ascii code of a symbol to put
 ;          (BYTE REGISTER | IMM)
 ; Out:     r8++ (for putting new char) | r8 = 0 if buffer flushed
-; Destroy: rax, rcx, r11
+; Destroy: rax, rcx
 ;------------------------------------------------------------------
 
 %macro mPutCharInBuffer 1
@@ -87,7 +87,7 @@ extern printf
 ;          r13 = string length
 ; Out:     r8 += string length (for putting the string)
 ;       || r8 = 0 if buffer flushed
-; Destroy: rax, rcx, r11, r13
+; Destroy: rax, r11, r13
 ;------------------------------------------------------------------
 
 PutStrInBuffer:
@@ -96,9 +96,9 @@ PutStrInBuffer:
     je .Done
 
 .Next:
-    mov rcx, [r11]
+    mov dil, byte [r11]
     ; print current char in buffer
-    mPutCharInBuffer cl
+    mPutCharInBuffer dil
     ; go to next char (string_ptr++)
     inc r11
     ; string_length--
@@ -704,21 +704,24 @@ ProcessSpecifierFloat:
 
 ProcessComplexFloat:
     ; flush the buffer first, as we will print in stdout in PrintComplexFloat
-    call FlushBuffer
+    ; call FlushBuffer
 
     ; !!!!!!!!!!!!!!!! we have to align stack by 16 bytes !!!!!!!!!!!!!!
     push rcx
     push rsi
     push r8
     push r12
+    push r14
     ; save xmms (for calling libC printf after)
     ; first 8 for storing xmm0, second 8 for storing xmm1
-    sub rsp, (8 * 2 + 8)
+    sub rsp, (8 * 2)
 
     movsd [rsp + 8], xmm1
     movsd [rsp + 0], xmm0
     ; put current float argument in xmm0 for PrintComplexFloat
     movsd xmm0, xmm8
+
+    lea rdi, [ComplexPrintfBuffer]
 
     call PrintComplexFloat
     
@@ -726,15 +729,20 @@ ProcessComplexFloat:
     movsd xmm0, [rsp + 0]
     movsd xmm1, [rsp + 8]
     ; restore stack
-    add rsp, (8 * 2 + 8)
+    add rsp, (8 * 2)
     
+    pop r14
     pop r12
     pop r8
     pop rsi
     pop rcx
     
-    ; add count of chars transmitted to stdout
-    add r15, rax
+    ; r11 --> string
+    lea r11, [ComplexPrintfBuffer]
+    ; r13 = string length
+    mov r13, rax
+    
+    call PutStrInBuffer
 
     jmp ShiftPointerToNextFloatArgument
 
@@ -878,6 +886,7 @@ PrintNumberInPowerOfTwoSystem:
     mov r13, INT_BUFFER_SIZE - 1
     ; move mask in dl, because REX instructions only support lower register bytes 
     mov dl, ch
+
 .NextByte:
     ; store lowest byte in dil
     mov dil, r10b
@@ -894,8 +903,8 @@ PrintNumberInPowerOfTwoSystem:
 .Letter:
     ; convert to ascii if letter --> add 'a' to a number but - 10 as ('a' = 10)
     add dil, 'a' - 10
-
 .DoneConvert:
+    
     ; store char in IntBuffer in reversed order
     lea r11, [IntBuffer]
     mov byte [r11 + r13], dil
@@ -1044,8 +1053,11 @@ IntBuffer           times INT_BUFFER_SIZE db 0x00
 ; it is made to do less syscalls
 ; Buffer allows to make syscall only when it filled
 ; it is done with the FlushBuffer function
-PRINTF_BUFFER_SIZE  equ 256
+PRINTF_BUFFER_SIZE  equ 1024
 PrintfBuffer        times PRINTF_BUFFER_SIZE db 0
+
+COMPLEX_PRINTF_BUFFER_SIZE equ 320
+ComplexPrintfBuffer        times COMPLEX_PRINTF_BUFFER_SIZE db 0
 
 ; It is a jump table for handling different specifiers in my_printf function
 ; It uses ASCII code of a specifier for indexing
